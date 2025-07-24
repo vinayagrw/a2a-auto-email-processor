@@ -18,7 +18,6 @@ import uvicorn
 from a2a.client import A2AClient, A2ACardResolver
 from a2a.types import Artifact as A2AArtifact
 from a2a.types import Task as A2ATask
-from chromadb.config import Settings
 from fastapi import Body, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -161,27 +160,42 @@ class SummaryAgent:
                     subject = artifact.metadata.get("subject")
                 elif artifact.type == "application/json" and artifact.metadata.get("type") == "classification":
                     intent = artifact.content
+                elif isinstance(artifact, dict) and artifact.get('type') == 'text/plain':
+                    # Handle case where artifact is a dictionary
+                    email_content = artifact.get('content')
+                    sender = artifact.get('metadata', {}).get('sender')
+                    subject = artifact.get('metadata', {}).get('subject')
 
-            if not email_content or intent != "summary_needed":
-                raise ValueError("Invalid task format or intent")
+            if not email_content:
+                raise ValueError("No email content found in task")
 
             # Generate summary
             summary = await self.generate_summary(email_content)
             
-            # Create response
-            response = SuccessResponse(
-                status="success",
-                message="Summary generated successfully",
-                summary=summary,
-                sender=sender,
-                subject=subject,
-                timestamp=datetime.now().isoformat()
-            )
+            # Create response in the expected format
+            response = {
+                "status": "completed",
+                "summaries": [{
+                    "artifact_id": f"email-{task.id}",
+                    "summary": summary,
+                    "metadata": {
+                        "sender": sender,
+                        "subject": subject,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                }],
+                "task_id": task.id
+            }
             
             return response
+            
         except Exception as e:
-            print(f"Error processing task: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
+            error_msg = f"Error processing task: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail={"error": error_msg}
+            )
             
     async def generate_summary(self, content: str) -> str:
         """Generate a summary of the given content"""

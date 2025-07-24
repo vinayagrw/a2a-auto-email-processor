@@ -36,8 +36,47 @@ The system consists of three main agents:
 1. Docker and Docker Compose
 2. Python 3.13
 3. Local LLM (Ollama or LM Studio)
-4. ChromaDB
+4. ChromaDB (latest version)
 5. Gmail API credentials
+
+## Recent Updates
+
+### ChromaDB Migration (2024-07-23)
+- Updated to use the new `PersistentClient` API
+- Removed deprecated `Settings` configuration
+- Simplified ChromaDB initialization
+
+To upgrade an existing installation:
+```bash
+pip install --upgrade chromadb
+# If you have existing data, migrate it using:
+# pip install chroma-migrate
+# chroma-migrate
+```
+
+## Testing the System
+
+### 1. Start the Summary Agent
+```bash
+python -m agents.summary_agent
+```
+
+### 2. In a new terminal, run the email processor test
+```bash
+python test_email_processor.py
+```
+
+### Expected Output
+- The test script will:
+  1. Authenticate with Gmail API (first time will open browser)
+  2. Fetch the latest 3 emails
+  3. Send them to the summary agent
+  4. Display the summary results
+
+### Verifying the Results
+1. Check the terminal output for summary results
+2. Review `summary_agent.log` for detailed logs
+3. The agent's API is available at `http://localhost:8003`
 
 ## Setup Instructions
 
