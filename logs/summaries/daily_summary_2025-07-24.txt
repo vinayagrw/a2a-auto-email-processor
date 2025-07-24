@@ -1,19 +1,7 @@
 
 
-=== Summary - 2025-07-24 00:04:27 ===
-From: john.doe@example.com
-Subject: Request for Quote - Kitchen Remodel
-Summary: John Doe has requested a quote for a kitchen remodel project involving a 200 sq ft space. The scope of work includes installing new cabinets, quartz countertops, a backsplash, and new flooring. He is seeking availability for a consultation to discuss the project details further.
-==================================================
-
-=== Summary - 2025-07-24 00:04:51 ===
-From: sarah.smith@example.com
-Subject: Follow-up on Bathroom Renovation
-Summary: Sarah Smith requests a detailed quote for renovating two bathrooms. The master bath is to undergo a full remodel with the installation of a walk-in shower, while the guest bath will receive an update on the vanity and flooring.
-==================================================
-
-=== Summary - 2025-07-24 00:05:11 ===
-From: emergency@apartmentcomplex.com
-Subject: Urgent: Water Damage Repair Needed
-Summary: Urgent water damage in Unit 3B at Oakwood Apartments requires immediate attention due to a leak from the bathroom ceiling. The property manager requests prompt scheduling of an emergency repair.
+=== Summary - 2025-07-24 02:10:03 ===
+From: foreman@construction.com
+Subject: Daily Construction Report - Site A
+Summary: Progress update: Framing is nearly completed at 80%, while electrical work stands at 50%. However, there's a delay in the lumber delivery. Action items include resolving the lumber issue to keep the construction schedule on track.
 ==================================================

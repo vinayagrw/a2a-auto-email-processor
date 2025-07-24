@@ -10,3 +10,5 @@ google-auth-oauthlib
 python-multipart
 pydantic
 httpx
+chromadb
+pydantic[email]

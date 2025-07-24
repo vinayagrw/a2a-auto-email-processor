@@ -22,27 +22,57 @@ from .config import (
     SUMMARY_AGENT_PORT,
 )
 
-# Import agent classes
-from .email_processor_agent import EmailProcessorAgent
-from .response_agent import ResponseAgent, app as response_app
-from .summary_agent import SummaryAgent, app as summary_app
+from .email_processor_agent import create_app as create_email_processor_app
+from .response_agent import create_app as create_response_app
+from .summary_agent import create_app as create_summary_app
 
-# Import models
-from .models import (
-    ArtifactModel,
-    ArtifactType,
-    Email,
-    ErrorResponse,
-    SuccessResponse,
-    TaskModel,
-    TaskStatus,
-)
 
-# Import utilities
-from .utils import create_fastapi_app, get_environment_variable
+
+# Create FastAPI app instances lazily to avoid circular imports
+def _get_email_processor_app():
+    return create_email_processor_app()
+
+def _get_response_app():
+    return create_response_app()
+
+def _get_summary_app():
+    return create_summary_app()
+
+# Lazy-loaded app instances
+email_processor_app = None
+response_app = None
+summary_app = None
+
+def _ensure_apps_initialized():
+    global email_processor_app, response_app, summary_app
+    if email_processor_app is None:
+        email_processor_app = _get_email_processor_app()
+    if response_app is None:
+        response_app = _get_response_app()
+    if summary_app is None:
+        summary_app = _get_summary_app()
+
+# Initialize apps on first access
+_ensure_apps_initialized()
+
 
 # Export all public symbols
 __all__ = [
+    # Agent modules
+    "email_processor_agent",
+    "response_agent",
+    "summary_agent",
+    
+    # App creation functions
+    "create_email_processor_app",
+    "create_response_app",
+    "create_summary_app",
+    
+    # App instances
+    "email_processor_app",
+    "response_app",
+    "summary_app",
+    
     # Configuration
     "BASE_DIR",
     "DATA_DIR",

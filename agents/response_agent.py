@@ -282,7 +282,11 @@ Your Contractor Team
             )
             
             # Initialize card resolver
-            self.resolver = A2ACardResolver()
+
+            self.resolver = A2ACardResolver(
+                httpx_client=self.httpx_client,
+                base_url=f"http://{A2A_SERVER_HOST}:{A2A_SERVER_PORT}"
+            )
             
             # Register the agent card
             self.agent_card = {
