@@ -82,7 +82,7 @@ class EmailWorkflowTester:
             response = await self.client.post(
                 f"{EMAIL_PROCESSOR_URL}/process_email",
                 json=payload,
-                timeout=30.0
+                timeout=500
             )
             response.raise_for_status()
             return response.json()
@@ -117,7 +117,7 @@ class EmailWorkflowTester:
                 
             # Log the processing result
             logger.info("Processing Result:")
-            logger.info(f"Status: {result.get('status', 'unknown')}")
+            logger.info(f"Status: {result}")
             
             if 'intent' in result:
                 logger.info(f"Detected Intent: {result['intent']}")
