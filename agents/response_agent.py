@@ -277,8 +277,8 @@ Your Contractor Team
             
             # Initialize A2A client
             self.client = A2AClient(
-                server_url=f"http://{A2A_SERVER_HOST}:{A2A_SERVER_PORT}",
-                client=self.httpx_client
+                httpx_client=self.httpx_client,
+                url=f"http://{A2A_SERVER_HOST}:{A2A_SERVER_PORT}"
             )
             
             # Initialize card resolver
