@@ -1,33 +1,42 @@
-# Ports used by the agents
-$ports = @(8001, 8002, 8003)
+@echo off
+setlocal enabledelayedexpansion
 
-Write-Host "Searching for processes using ports $($ports -join ', ')" -ForegroundColor Cyan
+:: Ports used by the agents
+set "ports=8001 8002 8003"
 
-foreach ($port in $ports) {
-    # Find the process using the port
-    $process = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue | 
-               Select-Object -ExpandProperty OwningProcess -ErrorAction SilentlyContinue |
-               Get-Process -ErrorAction SilentlyContinue
+echo Searching for agent processes...
 
-    if ($process) {
-        Write-Host "Found process using port $port:" -ForegroundColor Yellow
-        Write-Host "  PID: $($process.Id)"
-        Write-Host "  Name: $($process.ProcessName)"
-        Write-Host "  Path: $($process.Path)"
+for %%p in (%ports%) do (
+    echo Checking port %%p...
+    
+    :: Find process using the port
+    for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":%%p "') do (
+        set "pid=%%a"
         
-        # Kill the process
-        try {
-            Stop-Process -Id $process.Id -Force
-            Write-Host "  Successfully terminated process" -ForegroundColor Green
-        }
-        catch {
-            Write-Host "  Failed to terminate process: $_" -ForegroundColor Red
-        }
-    }
-    else {
-        Write-Host "No process found using port $port" -ForegroundColor Gray
-    }
-    Write-Host "----------------------------------------"
-}
+        :: Get process info
+        for /f "tokens=1,2 delims=," %%b in ('tasklist /fi "PID eq !pid!" /nh /fo:csv') do (
+            set "name=%%~b"
+            set "name=!name:"=!"
+            echo Found process using port %%p:
+            echo   PID: !pid!
+            echo   Name: !name!
+            
+            :: Kill the process
+            taskkill /F /PID !pid! >nul 2>&1
+            if !errorlevel! equ 0 (
+                echo   Successfully terminated process
+            ) else (
+                echo   Failed to terminate process
+            )
+        )
+    )
+    
+    if not defined pid (
+        echo No process found using port %%p
+    )
+    
+    echo ----------------------------------------
+)
 
-Write-Host "Done!" -ForegroundColor Green
+echo Done!
+endlocal

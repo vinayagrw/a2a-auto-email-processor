@@ -1,6 +1,6 @@
-# A2A MCP Contractor Email Automation
+# A2A Contractor Email Automation
 
-A lightweight demo application showcasing Agent-to-Agent (A2A) communication for automating email management in a small business contractor setting.
+A lightweight demo application showcasing Agent-to-Agent (A2A) communication using A2A SDK for automating email management in a small business contractor setting.
 
 ## Features
 
