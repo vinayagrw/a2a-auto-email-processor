@@ -14,6 +14,8 @@ from typing import List, Dict, Any, Optional
 import asyncio
 import logging
 from pathlib import Path
+import httpx
+import asyncio
 
 # Configure logging
 LOG_DIR = Path("logs")
@@ -191,12 +193,19 @@ async def send_to_email_processor(email_data: Dict[str, Any], processor_url: str
         logger.info(f"Sending email to processor - Subject: {payload.get('subject', 'No subject')}")
         
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # Fire and forget - we don't await the response
-            client.post(
+            # Send the request and wait for response
+            response = await client.post(
                 processor_url,
                 json=payload,
                 headers={"Content-Type": "application/json"}
             )
+            
+            # Log the response
+            logger.info(f"Response from email processor - Status: {response.status_code}")
+            if response.status_code != 200:
+                logger.error(f"Error response: {response.text}")
+            else:
+                logger.info(f"Successfully processed email: {response.text}")
             
     except Exception as e:
         logger.error(f"Error sending email to processor: {str(e)}")
@@ -252,6 +261,32 @@ async def main():
             logger.error(f"Unexpected error in main loop: {str(e)}")
             await asyncio.sleep(60)  # Wait before retrying
 
+async def check_health():
+    """Check if the email processor is healthy."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get("http://localhost:8001/health", timeout=10.0)
+            return {
+                "status": response.status_code,
+                "response": response.text,
+                "error": None
+            }
+    except Exception as e:
+        return {
+            "status": None,
+            "response": None,
+            "error": str(e)
+        }
+
 if __name__ == '__main__':
-    import asyncio
-    asyncio.run(main())
+    # First check if the email processor is running
+    health_check = asyncio.run(check_health())
+    print("\n=== Health Check ===")
+    if health_check["error"]:
+        print(f"❌ Error: {health_check['error']}")
+        print("Please make sure the email processor is running on http://localhost:8001")
+    else:
+        print(f"✅ Status: {health_check['status']}")
+        print(f"Response: {health_check['response']}")
+        print("\nStarting email processing...")
+        asyncio.run(main())

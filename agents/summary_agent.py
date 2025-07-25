@@ -462,22 +462,7 @@ def main():
                       help='Set the logging level')
     args = parser.parse_args()
     
-    # Convert log level string to logging level
-    log_level = getattr(logging, args.log_level.upper())
-    
-    # Configure logging
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler("summary_agent.log")
-        ]
-    )
-    
-    # Set uvicorn log level to match
-    uvicorn_log_level = args.log_level if args.log_level != 'debug' else 'debug'
-    
+
     # Create the FastAPI app
     app = create_app()
     
