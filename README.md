@@ -1,182 +1,400 @@
 # A2A Contractor Email Automation
 
-A lightweight demo application showcasing Agent-to-Agent (A2A) communication using A2A SDK for automating email management in a small business contractor setting.
+A lightweight demo application showcasing Agent-to-Agent (A2A) communication using A2A SDK for automating email management in a small business contractor setting. This system processes incoming emails, generates appropriate responses, and maintains a searchable database of email interactions.
+
+## Quick Start with Docker
+
+### Prerequisites
+- Docker Desktop (with WSL 2 enabled on Windows)
+- Git
+- Python 3.13 (optional, for local development)
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/yourusername/a2a-mcp-contractor-automation.git
+cd a2a-mcp-contractor-automation
+```
+
+### 2. Set Up Environment
+```bash
+# Create necessary directories
+mkdir -p data output logs
+
+# Make sure Docker Desktop is running
+```
+
+### 3. Start the Services
+```bash
+# Start all services in detached mode
+docker-compose up --build -d
+
+# View logs
+docker-compose logs -f
+```
+
+### 4. Access the Services
+- **Email Processor**: http://localhost:8001
+- **Response Agent**: http://localhost:8002
+- **Summary Agent**: http://localhost:8003
+
+### 5. Run the Gmail Integration
+```bash
+# Make sure to run this from your host machine
+python gmail_agent_integration.py
+```
+
+### 6. Stop the Services
+```bash
+docker-compose down
+```
 
 ## Features
 
-- Automated email processing and classification
-- Intelligent response generation for quote requests
-- Daily email interaction summaries
-- Clean A2A architecture with three collaborating agents
-- Local AI infrastructure integration
-- Containerized deployment
+- **Gmail Integration**: Directly fetch and process emails from Gmail
+- **Automated Classification**: Categorize incoming emails using local LLM
+- **Intelligent Responses**: Generate context-aware responses for quote requests
+- **Daily Summaries**: Automatic generation of daily email interaction summaries
+- **Searchable Database**: Store and query email interactions with ChromaDB
+- **Web Interface**: Built-in ChromaDB viewer for easy data exploration
+- **Modular Architecture**: Clean A2A architecture with specialized agents
+- **Local AI**: Runs entirely on your machine with Ollama or LM Studio
 
 ## Architecture
 
-The system consists of three main agents:
+The system consists of multiple specialized agents working together:
 
 1. **EmailProcessorAgent**
    - Monitors and processes incoming emails
    - Classifies email intent using local LLM
    - Delegates tasks to appropriate agents
-   - Manages artifact exchange
+   - Manages artifact exchange between agents
+   - Handles Gmail API integration
 
 2. **ResponseAgent**
    - Generates customized responses for quote requests
    - Uses local templates and LLM for response customization
-   - Maintains response consistency
+   - Maintains response consistency and tone
+   - Handles follow-up questions and clarifications
 
 3. **SummaryAgent**
    - Creates concise summaries of important email interactions
    - Maintains daily logs of email summaries
    - Uses local LLM for summarization
+   - Provides API endpoints for querying summaries
+
+4. **ChromaDB Viewer**
+   - Web interface for browsing stored emails and summaries
+   - Search and filter functionality
+   - Displays metadata and relationships
 
 ## Prerequisites
 
-1. Docker and Docker Compose
-2. Python 3.13
+### For Docker Deployment
+1. Docker Desktop (with WSL 2 enabled on Windows)
+2. Git
+3. Local LLM (Ollama or LM Studio) running on host machine
+
+### For Local Development
+1. Python 3.13
+2. Poetry (for dependency management)
 3. Local LLM (Ollama or LM Studio)
-4. ChromaDB (latest version)
-5. Gmail API credentials
+4. Gmail API credentials
 
 ## Recent Updates
+
+### Docker Support (2025-07-25)
+- Added Docker Compose for easy deployment
+- Containerized all agents
+- Simplified setup process
+- Improved networking between services
+
+### Gmail Integration (2025-07-24)
+- Added direct Gmail API integration for email fetching
+- Automatic processing of incoming emails
+- Support for attachments and rich text emails
 
 ### ChromaDB Migration (2024-07-23)
 - Updated to use the new `PersistentClient` API
 - Removed deprecated `Settings` configuration
-- Simplified ChromaDB initialization
+- Added web-based ChromaDB viewer
+- Improved data persistence and recovery
+
+### New Features
+- Added `gmail_agent_integration.py` for Gmail processing
+- Enhanced logging and error handling
+- Improved email parsing and metadata extraction
+- Added support for multiple email formats
 
 To upgrade an existing installation:
 ```bash
-pip install --upgrade chromadb
+pip install --upgrade chromadb google-auth-oauthlib google-api-python-client httpx
 # If you have existing data, migrate it using:
 # pip install chroma-migrate
 # chroma-migrate
 ```
 
-## Testing the System
+## Local Development Setup
 
-### 1. Start the Summary Agent
+### 1. Install Dependencies
 ```bash
-python -m agents.summary_agent
+# Install Poetry if you haven't already
+pip install poetry
+
+# Install project dependencies
+poetry install
+
+# Activate the virtual environment
+poetry shell
 ```
 
-### 2. In a new terminal, run the email processor test
+### 2. Set Up Environment Variables
+Create a `.env` file in the project root:
+```env
+# Gmail API Settings
+GMAIL_CREDENTIALS_PATH=./credentials/gmail_credentials.json
+GMAIL_TOKEN_PATH=./token.json
+
+# Agent Settings
+EMAIL_PROCESSOR_AGENT_PORT=8001
+RESPONSE_AGENT_PORT=8002
+SUMMARY_AGENT_PORT=8003
+
+# LLM Settings
+LLM_URL=http://localhost:11434/api/generate
+
+# Database Settings
+CHROMA_PERSIST_DIR=./data/chroma
+```
+
+### 3. Start Individual Agents
 ```bash
-python test_email_processor.py
+# Email Processor
+python -m uvicorn agents.email_processor_agent:app --host 0.0.0.0 --port 8001
+
+# Response Agent (in a new terminal)
+python -m uvicorn agents.response_agent:app --host 0.0.0.0 --port 8002
+
+# Summary Agent (in a new terminal)
+python -m uvicorn agents.summary_agent:app --host 0.0.0.0 --port 8003
+```
+
+### 4. Run Gmail Integration
+```bash
+python gmail_agent_integration.py
 ```
 
 ### Expected Output
-- The test script will:
-  1. Authenticate with Gmail API (first time will open browser)
-  2. Fetch the latest 3 emails
-  3. Send them to the summary agent
-  4. Display the summary results
+- The system will:
+  1. Authenticate with Gmail (first time will open browser)
+  2. Fetch and process the latest emails
+  3. Generate responses and summaries
+  4. Store everything in ChromaDB
 
 ### Verifying the Results
-1. Check the terminal output for summary results
-2. Review `summary_agent.log` for detailed logs
-3. The agent's API is available at `http://localhost:8003`
+1. Access the ChromaDB viewer at `http://localhost:8000`
+2. Check individual agent logs in the `logs/` directory
+3. View daily summaries in `logs/summaries/`
 
 ## Setup Instructions
 
 1. **Install Dependencies**
    ```bash
+   # Install Python requirements
    pip install -r requirements.txt
+   
+   # Install development dependencies
+   pip install pytest pytest-asyncio httpx
    ```
 
 2. **Set up Ollama**
    ```bash
-   # Install Ollama
-   curl https://ollama.ai/install.sh | sh
+   # Install Ollama (Linux/Mac)
+   curl -fsSL https://ollama.com/install.sh | sh
    
-   # Run Ollama
+   # Or on Windows, download from https://ollama.ai/download
+   
+   # Start Ollama service
    ollama serve
    
-   # Pull a model (e.g., llama2)
-   ollama pull llama2
+   # Pull a model (recommended: mistral or llama3)
+   ollama pull mistral
    ```
 
 3. **Set up Gmail API**
-   - Go to Google Cloud Console
-   - Create a new project
-   - Enable Gmail API
-   - Create OAuth 2.0 credentials
-   - Download credentials.json and place it in the project root
-
-4. **Environment Variables**
-   Create a `.env` file with:
+   ```bash
+   # Enable Gmail API
+   1. Go to Google Cloud Console: https://console.cloud.google.com/
+   2. Create a new project
+   3. Enable Gmail API
+   4. Configure OAuth consent screen
+   5. Create OAuth 2.0 credentials
+   6. Download credentials.json to project root
    ```
-   GMAIL_API_CREDENTIALS=/path/to/credentials.json
+
+4. **Environment Configuration**
+   Create a `.env` file in the project root:
+   ```env
+   # Required
+   GMAIL_API_CREDENTIALS=./credentials.json
    LLM_URL=http://localhost:11434/api/generate
+   
+   # Optional
+   LOG_LEVEL=INFO
+   CHROMA_PERSIST_DIR=./chroma_data
    ```
 
-5. **Run with Docker**
+5. **Running the System**
+
+   **Option 1: Using the provided script (recommended)**
    ```bash
-   # Build and run containers
-   docker-compose up --build
+   # Start all agents
+   ./run_agents.sh
+   
+   # In a separate terminal, start the ChromaDB viewer
+   python run_chroma_viewer.py
    ```
 
-6. **Run Directly**
+   **Option 2: Run agents individually**
    ```bash
-   # Run EmailProcessorAgent
+   # Terminal 1: Email Processor
    python agents/email_processor_agent.py
    
-   # Run ResponseAgent
+   # Terminal 2: Response Agent
    python agents/response_agent.py
    
-   # Run SummaryAgent
+   # Terminal 3: Summary Agent
    python agents/summary_agent.py
+   
+   # Terminal 4: ChromaDB Viewer
+   python chroma_viewer/main.py
+   ```
+
+   **Option 3: Docker Compose**
+   ```bash
+   # Build and run all services
+   docker-compose up --build
    ```
 
 ## Usage
 
-1. **Process Emails**
-   ```bash
-   curl -X POST http://localhost:8001/process_email \
-   -H "Content-Type: application/json" \
-   -d '{
-     "sender": "customer@example.com",
-     "subject": "Request for Quote",
-     "body": "I'm interested in your services..."
-   }'
-   ```
+### 1. Process Emails
 
-2. **Check Outputs**
-   - Responses: `output/templates/`
-   - Summaries: `output/summaries/daily_summary_YYYY-MM-DD.txt`
+**Via Gmail Integration**
+```bash
+# Process latest emails from Gmail
+python gmail_agent_integration.py
 
-## Code Structure
+# Process specific number of emails (e.g., 5)
+python gmail_agent_integration.py --max-results 5
+```
+
+**Via API**
+```bash
+# Process a single email
+curl -X POST http://localhost:8001/process_email \
+-H "Content-Type: application/json" \
+-d '{
+  "sender": "customer@example.com",
+  "subject": "Request for Quote",
+  "body": "I'm interested in your services..."
+}'
+```
+
+### 2. View Data
+- **ChromaDB Viewer**: `http://localhost:8000`
+- **Daily Summaries**: `logs/summaries/daily_summary_YYYY-MM-DD.txt`
+- **Agent Logs**: `logs/` directory
+
+### 3. Search and Query
+Use the ChromaDB viewer to:
+- Browse all stored emails and summaries
+- Search by content, sender, or date
+- View relationships between messages
+
+## Project Structure
 
 ```
 a2a-mcp-contractor-automation/
-├── agents/
-│   ├── email_processor_agent.py
-│   ├── response_agent.py
-│   └── summary_agent.py
-├── config.py
-├── requirements.txt
-├── Dockerfile
-├── docker-compose.yml
-└── output/
-    ├── templates/
-    └── summaries/
+├── agents/                     # Agent implementations
+│   ├── __init__.py
+│   ├── email_processor_agent.py  # Processes incoming emails
+│   ├── response_agent.py        # Generates responses
+│   └── summary_agent.py         # Creates email summaries
+│
+├── chroma_viewer/             # Web interface for ChromaDB
+│   ├── static/                # Frontend assets
+│   ├── templates/             # HTML templates
+│   └── main.py                # FastAPI application
+│
+├── logs/                      # Log files
+│   └── summaries/             # Daily email summaries
+│
+├── tests/                     # Test files
+│   ├── test_email_processor.py
+│   └── test_summary_agent.py
+│
+├── .env.example              # Example environment variables
+├── config.py                 # Configuration settings
+├── gmail_agent_integration.py # Gmail API integration
+├── requirements.txt           # Python dependencies
+├── run_agents.sh             # Script to start all agents
+└── run_chroma_viewer.py      # Script to start ChromaDB viewer
 ```
 
-## AI Integration
+## AI Integration & Configuration
 
-The system uses:
-- Local LLM (Ollama/LM Studio) for:
-  - Email intent classification
-  - Response generation
-  - Summary creation
-- ChromaDB for:
-  - Context storage
-  - Template management
-  - Summary history
+### Local LLM Setup
+This system uses Ollama with the following recommended models:
+- **mistral**: Best for general use (recommended)
+- **llama3**: Good alternative with strong performance
+- **phi3**: Lightweight option for less powerful machines
+
+To change the model, modify the `model_name` in the respective agent files.
+
+### ChromaDB Configuration
+- Data is persisted in `./chroma_data` by default
+- Collections are automatically created for:
+  - `emails`: Raw email content and metadata
+  - `summaries`: Generated email summaries
+  - `responses`: Generated email responses
+
+### Performance Tuning
+- Adjust timeouts in `.env` if needed:
+  ```env
+  LLM_TIMEOUT=300  # 5 minutes for LLM responses
+  GMAIL_TIMEOUT=60  # 1 minute for Gmail API
+  ```
+- For better performance, ensure your system meets these requirements:
+  - At least 8GB RAM (16GB recommended)
+  - 4+ CPU cores
+  - 10GB+ free disk space for models and data
 
 
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Gmail API Authentication**
+   - Delete `token.json` and restart if authentication fails
+   - Ensure `credentials.json` is in the project root
+
+2. **Ollama Connection Issues**
+   - Verify `ollama serve` is running
+   - Check that the model is downloaded: `ollama list`
+
+3. **ChromaDB Errors**
+   - Delete the `chroma_data` directory to reset (will lose data)
+   - Ensure no other process is using the database
+
+4. **Logs**
+   - Check `logs/` directory for detailed error messages
+   - Set `LOG_LEVEL=DEBUG` in `.env` for more verbose logging
+
+## Support
+
+For issues and feature requests, please open an issue on the project repository.
 
 ## License
 
-MIT License - see LICENSE file for details
+MIT License - see [LICENSE](LICENSE) file for details

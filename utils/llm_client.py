@@ -48,7 +48,7 @@ class LLMClassifier:
             
             Respond with ONLY the intent label in quotes, e.g. "quote_request".
             """
-            
+            logger.info(f"Classifying email with LLM for prompt: {prompt}")
             # Call the LLM
             response = await self.client.post(
                 f"{self.base_url}/generate",
@@ -59,6 +59,7 @@ class LLMClassifier:
                     "temperature": 0.1
                 }
             )
+            logger.info(f"LLM response: {response}")
             response.raise_for_status()
             
             # Parse and validate the response

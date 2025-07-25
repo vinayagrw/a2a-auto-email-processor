@@ -39,15 +39,52 @@ except ImportError:
     )
 
 # Configure logging
+import os
+import sys
+import argparse
+from pathlib import Path
+
+# Parse command line arguments first
+parser = argparse.ArgumentParser()
+parser.add_argument('--log-level', type=str.upper, default='DEBUG',
+                   choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+                   help='Set the logging level (DEBUG, INFO, WARNING, ERROR)')
+
+# Parse known args and ignore the rest to avoid conflicts with other argument parsers
+args, _ = parser.parse_known_args()
+
+# Convert log level from string to logging level
+try:
+    log_level = getattr(logging, args.log_level.upper())
+except (AttributeError, TypeError) as e:
+    print(f"Invalid log level: {args.log_level}. Defaulting to INFO")
+    log_level = logging.INFO
+
+# Set up logging directory
+BASE_DIR = Path(__file__).parent.parent
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(exist_ok=True, parents=True)
+
+# Clear any existing handlers to avoid duplicate logs
+root_logger = logging.getLogger()
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+    handler.close()
+
+# Configure root logger
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("response_agent.log")
+        logging.FileHandler(LOG_DIR / "response_agent.log", mode='a'),  # Append to log file
+        logging.StreamHandler(sys.stdout)  # Log to console
     ]
 )
+
+# Get logger for this module
 logger = logging.getLogger(__name__)
+logger.info(f"Response Agent logging initialized at level {args.log_level}")
+logger.debug("Debug logging is enabled")
 
 # Models
 class SuccessResponse(BaseModel):
@@ -262,6 +299,7 @@ class ResponseAgent:
             }
             
             logger.info(f"Generated response for intent: {intent}")
+            logger.info(f"Generated response: {result}")
             return result
             
         except Exception as e:
@@ -320,7 +358,7 @@ class ResponseAgent:
             """
 
             logger.debug(f"Sending prompt to LLM for intent: {intent}")
-            
+            logger.info(f"Generating response with LLM for prompt: {prompt}")
             # Use httpx.AsyncClient for async HTTP requests
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -465,17 +503,32 @@ def create_app():
 
 def main():
     """Run the FastAPI application with uvicorn."""
-    import uvicorn
+    import argparse
+    
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Run the Response Agent')
+    parser.add_argument('--log-level', type=str, default='info',
+                      choices=['debug', 'info', 'warning', 'error'],
+                      help='Set the logging level')
+    args = parser.parse_args()
+    
+    # Convert log level string to logging level
+    log_level = getattr(logging, args.log_level.upper())
     
     # Configure logging
     logging.basicConfig(
-        level=logging.INFO,
+        level=log_level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[
             logging.StreamHandler(),
             logging.FileHandler("response_agent.log")
         ]
     )
+    
+    # Set uvicorn log level to match
+    uvicorn_log_level = args.log_level if args.log_level != 'debug' else 'debug'
+    
+    import uvicorn
     
     # Create the FastAPI app
     app = create_app()
@@ -485,7 +538,7 @@ def main():
         app,
         host="0.0.0.0",
         port=RESPONSE_AGENT_PORT,
-        log_level="info"
+        log_level=uvicorn_log_level
     )
 
 if __name__ == "__main__":

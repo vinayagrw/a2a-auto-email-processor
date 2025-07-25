@@ -40,15 +40,52 @@ except ImportError:
     )
 
 # Configure logging
+import os
+import sys
+import argparse
+from pathlib import Path
+
+# Parse command line arguments first
+parser = argparse.ArgumentParser()
+parser.add_argument('--log-level', type=str.upper, default='DEBUG',
+                   choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+                   help='Set the logging level (DEBUG, INFO, WARNING, ERROR)')
+
+# Parse known args and ignore the rest to avoid conflicts with other argument parsers
+args, _ = parser.parse_known_args()
+
+# Convert log level from string to logging level
+try:
+    log_level = getattr(logging, args.log_level.upper())
+except (AttributeError, TypeError) as e:
+    print(f"Invalid log level: {args.log_level}. Defaulting to INFO")
+    log_level = logging.INFO
+
+# Set up logging directory
+BASE_DIR = Path(__file__).parent.parent
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(exist_ok=True, parents=True)
+
+# Clear any existing handlers to avoid duplicate logs
+root_logger = logging.getLogger()
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+    handler.close()
+
+# Configure root logger
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("summary_agent.log")
+        logging.FileHandler(LOG_DIR / "summary_agent.log", mode='a'),  # Append to log file
+        logging.StreamHandler(sys.stdout)  # Log to console
     ]
 )
+
+# Get logger for this module
 logger = logging.getLogger(__name__)
+logger.info(f"Summary Agent logging initialized at level {args.log_level}")
+logger.debug("Debug logging is enabled")
 
 # Ensure the persist directory exists
 os.makedirs(CHROMA_PERSIST_DIR, exist_ok=True)
@@ -259,7 +296,7 @@ class SummaryAgent:
             
             Summary:
             """
-            
+            logger.info(f"Generating summary with LLM for prompt: {prompt}")
             # Call the local LLM (Ollama)
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
@@ -279,6 +316,7 @@ class SummaryAgent:
                 
                 if response.status_code == 200:
                     result = response.json()
+                    logger.info(f"Generated summary with LLM for prompt: {result}")
                     return result.get("response", "").strip()
                 else:
                     error_msg = f"LLM API error: {response.text}"
@@ -388,7 +426,8 @@ def create_app() -> FastAPI:
                 "message": "Task processed successfully",
                 "data": result
             }
-
+            logger.info(f"Task processed successfully: {result}")
+        
         except Exception as e:
             error_msg = f"Failed to process task: {str(e)}"
             logger.error(error_msg)
@@ -413,17 +452,31 @@ def create_app() -> FastAPI:
 
 def main():
     """Run the FastAPI application with uvicorn."""
+    import argparse
     import uvicorn
+    
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Run the Summary Agent')
+    parser.add_argument('--log-level', type=str, default='info',
+                      choices=['debug', 'info', 'warning', 'error'],
+                      help='Set the logging level')
+    args = parser.parse_args()
+    
+    # Convert log level string to logging level
+    log_level = getattr(logging, args.log_level.upper())
     
     # Configure logging
     logging.basicConfig(
-        level=logging.INFO,
+        level=log_level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[
             logging.StreamHandler(),
             logging.FileHandler("summary_agent.log")
         ]
     )
+    
+    # Set uvicorn log level to match
+    uvicorn_log_level = args.log_level if args.log_level != 'debug' else 'debug'
     
     # Create the FastAPI app
     app = create_app()
@@ -438,11 +491,10 @@ def main():
         app,
         host="0.0.0.0",
         port=SUMMARY_AGENT_PORT,
-        log_level="info"
+        log_level="debug"
     )
 
-# Create FastAPI app after all definitions to avoid circular imports
-app = create_app()
+
 
 # This allows the agent to be run directly with: python -m agents.summary_agent
 if __name__ == "__main__":

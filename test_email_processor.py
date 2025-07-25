@@ -70,7 +70,7 @@ def get_latest_emails(service, max_results=5):
         emails.append({
             'id': msg['id'],
             'subject': subject,
-            'from': sender,
+            'sender': sender,
             'date': date,
             'snippet': txt.get('snippet', ''),
             'body': body
@@ -89,7 +89,7 @@ async def send_to_summary_agent(email_data):
                     "type": "email",
                     "content": json.dumps({
                         "subject": email_data['subject'],
-                        "from": email_data['from'],
+                        "sender": email_data['sender'],
                         "body": email_data['body']
                     }),
                     "metadata": {

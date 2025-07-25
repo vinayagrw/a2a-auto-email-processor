@@ -15,6 +15,7 @@ start_agent() {
     local log_file="$LOG_DIR/${agent_name}_$(date +%Y%m%d_%H%M%S).log"
     
     echo "=== Starting $agent_name ===" | tee -a "$log_file"
+    # Run with debug logging enabled
     PYTHONPATH="$PROJECT_ROOT" python -m "agents.$agent_module" 2>&1 | tee -a "$log_file" &
     echo "$!" > "$LOG_DIR/${agent_name}.pid"
     echo "Started $agent_name (PID: $(cat "$LOG_DIR/${agent_name}.pid"))"

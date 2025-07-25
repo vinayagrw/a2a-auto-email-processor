@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Optional
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
@@ -77,12 +77,12 @@ class EmailWorkflowTester:
                 "attachments": email_data.get("attachments", [])
             }
             
-            logger.debug(f"Sending payload: {payload}")
+            logger.info(f"Sending payload: {payload}")
             
             response = await self.client.post(
                 f"{EMAIL_PROCESSOR_URL}/process_email",
                 json=payload,
-                timeout=500
+                timeout=30
             )
             response.raise_for_status()
             return response.json()
