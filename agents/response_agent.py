@@ -3,12 +3,9 @@ Response Agent for A2A MCP Contractor Automation.
 
 This module handles generating responses to incoming requests.
 """
-import os
-import sys
-import json
+import sys,os
+import socket
 import logging
-import asyncio
-import uvicorn
 from datetime import datetime
 from typing import Dict, Any, Optional, List, AsyncGenerator
 from pathlib import Path
@@ -20,31 +17,36 @@ from a2a.types import Task, Artifact
 from fastapi import FastAPI, HTTPException, Body, status, Request, Response
 import httpx
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 
-# Import configuration
-try:
-    from .config import (
-        A2A_SERVER_HOST,
-        A2A_SERVER_PORT,
-        RESPONSE_AGENT_PORT,
-        OUTPUT_DIR
-    )
-except ImportError:
-    # Fall back to absolute import if running directly
-    from config import (
-        A2A_SERVER_HOST,
-        A2A_SERVER_PORT,
-        RESPONSE_AGENT_PORT,
-        OUTPUT_DIR
-    )
+# Add the parent directory to the path
+sys.path.append(str(Path(__file__).parent.parent))
+
+# Load environment variables
+load_dotenv()
+
+# Import from consolidated config
+from config import (
+    LOG_LEVEL, 
+    A2A_SERVER_HOST, A2A_SERVER_PORT, LOG_FILE,
+    OLLAMA_API_BASE, OLLAMA_MODEL,
+)
 
 # Configure logging
-import os
-import sys
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(LOG_FILE)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Parse command line arguments first
 import argparse
 from pathlib import Path
 
-# Parse command line arguments first
 parser = argparse.ArgumentParser()
 parser.add_argument('--log-level', type=str.upper, default='DEBUG',
                    choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
@@ -140,40 +142,6 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     
-    @app.post(
-        "/process_test",
-        response_model=SuccessResponse,
-        responses={
-            200: {"model": SuccessResponse},
-            500: {"model": ErrorResponse}
-        }
-    )
-    async def process_task(task: TaskModel = Body(...)):
-        """
-        Process a task and generate a response.
-        
-        - **task**: The task containing artifacts to be processed
-        - **returns**: The generated response with metadata
-        """
-        try:
-            if not agent.initialized:
-                await agent.initialize()
-                
-            result = await agent.process_task_internal(task)
-            return {
-                "success": True,
-                "message": "Task processed successfully",
-                "data": result
-            }
-            
-        except Exception as e:
-            error_msg = f"Failed to process task: {str(e)}"
-            logger.error(error_msg)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={"error": error_msg}
-            )
-    
     @app.get(
         "/health",
         response_model=SuccessResponse,
@@ -196,36 +164,108 @@ def create_app() -> FastAPI:
 class ResponseAgent:
     """Agent responsible for generating responses to emails based on their content and intent."""
     
-    def __init__(self):
+    def __init__(self, base_url: str = None, model: str = None):
         """Initialize the ResponseAgent with required components."""
         self.httpx_client = None
-        self.resolver = None
-        self.agent_card = None
         self.client = None
         self.initialized = False
-    
+        self.llm = None
+        self.template_engine = None
+        self.a2a_server_url = os.getenv("A2A_SERVER_URL", "http://a2a_server:8000")
+        self.service_name = "response_agent"
+        self.service_port = int(os.getenv("RESPONSE_AGENT_PORT", "8002"))
+        self.base_url = base_url or OLLAMA_API_BASE
+        self.model = model or OLLAMA_MODEL
+
+    async def initialize(self) -> bool:
+        """
+        Initialize the agent, register with A2A server, and set up dependencies.
+        
+        Returns:
+            bool: True if initialization was successful
+            
+        Raises:
+            Exception: If initialization fails
+        """
+        try:
+            # Initialize HTTP client
+            self.httpx_client = httpx.AsyncClient()
+            
+            # Initialize A2A client with the configured server URL
+            self.client = A2AClient(
+                httpx_client=self.httpx_client,
+                url=self.a2a_server_url
+            )
+            
+            # Register with A2A server using direct HTTP call
+            service_url = f"http://{socket.gethostname()}:{self.service_port}"
+            registration_data = {
+                "name": self.service_name,
+                "url": service_url,
+                "type": "agent",
+                "capabilities": ["response_generation"]  # Only response generation for this agent
+            }
+            
+            # Set up agent card with service information
+            self.agent_card = {
+                "type": "agent",
+                "name": "Response Agent",
+                "description": "Generates responses to incoming requests",
+                "version": "1.0.0",
+                "url": service_url,
+                "capabilities": ["response_generation"],
+                "status": "ready"
+            }
+            
+            # Make HTTP request to register the service
+            try:
+                response = await self.httpx_client.post(
+                    f"{self.a2a_server_url}/services",
+                    json=registration_data
+                )
+                response.raise_for_status()
+                logger.info(f"Successfully registered with A2A server at {self.a2a_server_url}")
+                
+                self.initialized = True
+                logger.info(f"Response Agent initialized successfully")
+                return True
+                
+            except Exception as e:
+                error_msg = f"Failed to register with A2A server: {str(e)}"
+                logger.error(error_msg)
+                raise RuntimeError(error_msg) from e
+            
+        except Exception as e:
+            error_msg = f"Failed to initialize ResponseAgent: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            self.initialized = False
+            raise Exception(error_msg) from e
+
     async def process_task_internal(self, task: TaskModel) -> dict:
         """
-        Process a task that requires a response.
+        Process a task that requires a response or summary.
         
         Args:
             task: The task containing artifacts to be processed
             
         Returns:
-            dict: A generated response for the provided content
+            dict: A generated response or summary for the provided content
             
         Raises:
             HTTPException: If there's an error processing the task
         """
         try:
             logger.info(f"Processing task: {task.id}")
+            
+
             result = await self._process_task(task)
             return {
                 "status": "success",
                 "message": "Response generated successfully",
-                "data": result
+                "data": result,
+                "is_summary": False
             }
-            
+        
         except HTTPException:
             raise
             
@@ -362,9 +402,9 @@ class ResponseAgent:
             # Use httpx.AsyncClient for async HTTP requests
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    "http://localhost:11434/api/generate",  # Ollama API endpoint
+                    f"{self.base_url}/generate", # Ollama API endpoint
                     json={
-                        "model": "mistral",
+                        "model": self.model,
                         "prompt": prompt.strip(),
                         "stream": False
                     },
@@ -405,25 +445,52 @@ class ResponseAgent:
             # Initialize HTTP client
             self.httpx_client = httpx.AsyncClient()
             
-            # Initialize A2A client
-            self.client = A2AClient(
-                httpx_client=self.httpx_client,
-                url=f"http://{A2A_SERVER_HOST}:{A2A_SERVER_PORT}"
-            )
-            
-            # Initialize card resolver
-            self.resolver = A2ACardResolver(
-                httpx_client=self.httpx_client,
-                base_url=f"http://{A2A_SERVER_HOST}:{A2A_SERVER_PORT}"
-            )
-            
-            # Register the agent card
-            self.agent_card = {
-                "type": "agent",
-                "name": "response_agent",
-                "description": "Generates responses to incoming emails based on their content and intent.",
-                "version": "1.0.0"
-            }
+            # Initialize A2A client with the configured server URL
+            try:
+                logger.info(f"Initializing A2A client with server at {self.a2a_server_url}")
+                self.client = A2AClient(
+                    httpx_client=self.httpx_client,
+                    url=self.a2a_server_url
+                )
+                
+                # Initialize card resolver for service discovery
+                self.resolver = A2ACardResolver(
+                    httpx_client=self.httpx_client,
+                    base_url=self.a2a_server_url
+                )
+                
+                # Register the agent card with A2A server
+                self.agent_card = {
+                    "type": "agent",
+                    "name": "response_agent",
+                    "description": "Generates responses to incoming emails based on their content and intent.",
+                    "version": "1.0.0",
+                    "capabilities": ["response_generation"],
+                    "status": "ready"
+                }
+                
+                # Register with A2A server using direct HTTP call
+                service_url = f"http://{socket.gethostname()}:{self.service_port}"
+                registration_data = {
+                    "name": "response_agent",
+                    "url": service_url,
+                    "type": "agent",
+                    "capabilities": ["response_generation"]
+                }
+                
+                # Make HTTP request to register the service
+                response = await self.httpx_client.post(
+                    f"{self.a2a_server_url}/services",
+                    json=registration_data
+                )
+                response.raise_for_status()
+                
+                logger.info(f"Successfully registered with A2A server at {self.a2a_server_url}")
+                
+            except Exception as e:
+                error_msg = f"Failed to initialize A2A client: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                raise RuntimeError(error_msg) from e
             
             self.initialized = True
             logger.info("ResponseAgent initialized successfully")
@@ -515,15 +582,6 @@ def main():
     # Convert log level string to logging level
     log_level = getattr(logging, args.log_level.upper())
     
-    # Configure logging
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler("response_agent.log")
-        ]
-    )
     
     # Set uvicorn log level to match
     uvicorn_log_level = args.log_level if args.log_level != 'debug' else 'debug'
@@ -540,6 +598,7 @@ def main():
         port=RESPONSE_AGENT_PORT,
         log_level=uvicorn_log_level
     )
+
 
 if __name__ == "__main__":
     main()

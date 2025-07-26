@@ -283,10 +283,9 @@ if __name__ == '__main__':
     health_check = asyncio.run(check_health())
     print("\n=== Health Check ===")
     if health_check["error"]:
-        print(f"❌ Error: {health_check['error']}")
         print("Please make sure the email processor is running on http://localhost:8001")
     else:
-        print(f"✅ Status: {health_check['status']}")
+        print(f"Status: {health_check['status']}")
         print(f"Response: {health_check['response']}")
         print("\nStarting email processing...")
         asyncio.run(main())

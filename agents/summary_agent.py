@@ -3,47 +3,45 @@ Summary Agent for A2A MCP Contractor Automation.
 
 This module handles generating summaries of incoming requests.
 """
-import asyncio
-import json
+import sys
+import socket
 import logging
 import os
-import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
-import chromadb
 import httpx
 import uvicorn
-from a2a.client import A2AClient, A2ACardResolver
+from a2a.client import A2AClient,A2ACardResolver
 from a2a.types import Artifact as A2AArtifact
 from a2a.types import Task as A2ATask
 from fastapi import Body, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 # Import configuration
-try:
-    from .config import (
-        A2A_SERVER_HOST,
-        A2A_SERVER_PORT,
-        SUMMARY_AGENT_PORT,
-        CHROMA_PERSIST_DIR
-    )
-except ImportError:
-    # Fall back to absolute import if running directly
-    from config import (
-        A2A_SERVER_HOST,
-        A2A_SERVER_PORT,
-        SUMMARY_AGENT_PORT,
-        CHROMA_PERSIST_DIR
-    )
+from config import (
+    SUMMARY_AGENT_PORT,
+    LOG_LEVEL,
+    LOG_FILE,
+    OLLAMA_API_BASE,
+    OLLAMA_MODEL
+)
 
 # Configure logging
-import os
-import sys
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(LOG_FILE)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Parse command line arguments
 import argparse
-from pathlib import Path
 
 # Parse command line arguments first
 parser = argparse.ArgumentParser()
@@ -87,9 +85,6 @@ logger = logging.getLogger(__name__)
 logger.info(f"Summary Agent logging initialized at level {args.log_level}")
 logger.debug("Debug logging is enabled")
 
-# Ensure the persist directory exists
-os.makedirs(CHROMA_PERSIST_DIR, exist_ok=True)
-
 class SuccessResponse(BaseModel):
     success: bool = True
     message: str = "Operation completed successfully"
@@ -112,18 +107,21 @@ class ArtifactModel(BaseModel):
     metadata: Optional[dict] = {}
 
 class SummaryAgent:
-    def __init__(self):
+    def __init__(self, base_url: str = None, model: str = None):
         self.httpx_client = None
         self.client = None
-        self.chroma_client = None
-        self.collection = None
         self.initialized = False
         self.resolver = None
         self.agent_card = None
+        self.a2a_server_url = os.getenv("A2A_SERVER_URL", "http://a2a_server:8000")
+        self.service_name = "summary_agent"
+        self.service_port = int(os.getenv("SUMMARY_AGENT_PORT", "8003"))
+        self.base_url = base_url or OLLAMA_API_BASE
+        self.model = model or OLLAMA_MODEL
 
     async def initialize(self) -> bool:
         """
-        Initialize the agent and its dependencies.
+        Initialize the agent, register with A2A server, and set up dependencies.
         
         Returns:
             bool: True if initialization was successful
@@ -135,46 +133,64 @@ class SummaryAgent:
             # Initialize HTTP client
             self.httpx_client = httpx.AsyncClient()
             
-            # Initialize A2A client with correct signature
+            # Initialize A2A client with the configured server URL
             self.client = A2AClient(
                 httpx_client=self.httpx_client,
-                url=f"http://{A2A_SERVER_HOST}:{A2A_SERVER_PORT}"
+                url=self.a2a_server_url
             )
             
-            # Initialize ChromaDB client with new persistent client
-            self.chroma_client = chromadb.PersistentClient(path=CHROMA_PERSIST_DIR)
-            
-            # Create or get collection
-            self.collection = self.chroma_client.get_or_create_collection(
-                name="summaries",
-                metadata={"hnsw:space": "cosine"}
-            )
-            
-            # Initialize card resolver
+            # Initialize card resolver for service discovery
             self.resolver = A2ACardResolver(
                 httpx_client=self.httpx_client,
-                base_url=f"http://{A2A_SERVER_HOST}:{A2A_SERVER_PORT}"
+                base_url=self.a2a_server_url
             )
             
-            # Register the agent card
+            # Set up agent card with service information
+            service_url = f"http://{socket.gethostname()}:{self.service_port}"
             self.agent_card = {
                 "type": "agent",
                 "name": "Summary Agent",
                 "description": "Generates summaries of incoming requests",
                 "version": "1.0.0",
-                "url": f"http://localhost:{SUMMARY_AGENT_PORT}",
+                "url": service_url,
                 "capabilities": ["summarization"],
                 "status": "ready"
             }
             
+            # Register with A2A server using direct HTTP call
+            registration_data = {
+                "name": self.service_name,
+                "url": service_url,
+                "type": "agent",
+                "capabilities": ["summarization"]
+            }
+            
+            try:
+                response = await self.httpx_client.post(
+                    f"{self.a2a_server_url}/services",
+                    json=registration_data
+                )
+                response.raise_for_status()
+                logger.info(f"Successfully registered with A2A server at {self.a2a_server_url}")
+                
+                self.initialized = True
+                logger.info(f"Summary Agent initialized successfully")
+                return True
+                
+            except Exception as e:
+                error_msg = f"Failed to register with A2A server: {str(e)}"
+                logger.error(error_msg)
+                raise RuntimeError(error_msg) from e
+            
             self.initialized = True
-            logger.info("Summary Agent initialized successfully")
+            logger.info(f"Summary Agent initialized and registered with A2A server at {self.a2a_server_url}")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to initialize SummaryAgent: {str(e)}")
+            error_msg = f"Failed to initialize SummaryAgent: {str(e)}"
+            logger.error(error_msg, exc_info=True)
             self.initialized = False
-            raise
+            raise Exception(error_msg) from e
 
     async def process_task_internal(self, task: TaskModel) -> Dict[str, Any]:
         """
@@ -238,43 +254,64 @@ class SummaryAgent:
             logger.error(f"Error in _process_task: {str(e)}")
             raise
             
-    def _get_daily_log_path(self) -> Path:
-        """Get the path for today's summary log file"""
-        today = datetime.now().strftime("%Y-%m-%d")
-        log_dir = Path("logs/summaries")
-        log_dir.mkdir(parents=True, exist_ok=True)
-        return log_dir / f"daily_summary_{today}.txt"
+    async def _store_summary(self, content: str, metadata: dict) -> dict:
+        """
+        Prepare summary data for storage.
+        
+        Args:
+            content: The summary content
+            metadata: Additional metadata for the summary
+            
+        Returns:
+            dict: The summary data to be stored
+        """
+        return {
+            "content": content,
+            "metadata": {
+                "type": "summary",
+                "created_at": datetime.now().isoformat(),
+                **metadata
+            }
+        }
 
-    def _log_summary_to_file(self, summary: str, metadata: dict):
-        """Log the summary to today's log file with metadata"""
+    async def generate_summary(self, content: str, metadata: Optional[dict] = None) -> str:
+        """
+        Generate a summary of the given content using a local LLM.
+        
+        Args:
+            content: The text content to summarize
+            metadata: Optional dictionary containing metadata (sender, subject, etc.)
+            
+        Returns:
+            str: The generated summary
+        """
+        if not content.strip():
+            return "[No content to summarize]"
+            
+        metadata = metadata or {}
+        
         try:
-            log_path = self._get_daily_log_path()
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # Generate the summary using LLM
+            summary_text = await self._generate_with_llm(content)
             
-            log_entry = f"\n\n=== Summary - {timestamp} ===\n"
-            log_entry += f"From: {metadata.get('sender', 'Unknown')}\n"
-            log_entry += f"Subject: {metadata.get('subject', 'No Subject')}\n"
-            log_entry += f"Summary: {summary}\n"
-            log_entry += "=" * 50
+            # Prepare summary data
+            summary_data = await self._store_summary(
+                content=summary_text,
+                metadata={
+                    "task_id": metadata.get("task_id", "Unknown"),
+                    "model": self.model,
+                    **metadata
+                }
+            )
             
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(log_entry)
-                
-            logger.info(f"Summary logged to {log_path}")
+            logger.info(f"Generated summary for task: {metadata.get('task_id', 'Unknown')}")
+            
+            return summary_text
             
         except Exception as e:
-            logger.error(f"Failed to write summary to log file: {str(e)}")
-            # Don't fail the operation if logging fails
-
-    async def _check_ollama_available(self) -> None:
-        """Verify Ollama service is available"""
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                response = await client.get("http://localhost:11434/api/tags")
-                if response.status_code != 200:
-                    raise RuntimeError(f"Ollama API returned status {response.status_code}")
-        except (httpx.ConnectError, httpx.ReadTimeout) as e:
-            raise RuntimeError("Failed to connect to Ollama service. Please ensure it's running.") from e
+            logger.error(f"Error in generate_summary: {str(e)}")
+            # Return a basic fallback summary if anything goes wrong
+            return f"Summary: {content}..."
 
     async def _generate_with_llm(self, content: str) -> str:
         """Generate a summary using the local LLM (Ollama)"""
@@ -283,7 +320,7 @@ class SummaryAgent:
         
         try:
             # Using Ollama's API - adjust the model name as needed
-            model_name = "mistral"  # or "phi", "neural-chat"
+            model_name = self.model # or "phi", "neural-chat"
             
             # Prepare the prompt for summarization
             prompt = f"""
@@ -300,7 +337,7 @@ class SummaryAgent:
             # Call the local LLM (Ollama)
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
-                    "http://localhost:11434/api/generate",
+                    f"{self.base_url}/generate",
                     json={
                         "model": model_name,
                         "prompt": prompt.strip(),
@@ -327,36 +364,6 @@ class SummaryAgent:
             error_msg = f"Error generating summary with LLM: {str(e)}"
             logger.error(error_msg)
             raise RuntimeError(error_msg) from e
-
-    async def generate_summary(self, content: str, metadata: Optional[dict] = None) -> str:
-        """
-        Generate a summary of the given content using a local LLM.
-        
-        Args:
-            content: The text content to summarize
-            metadata: Optional dictionary containing metadata (sender, subject, etc.)
-            
-        Returns:
-            str: The generated summary
-        """
-        if not content.strip():
-            return "[No content to summarize]"
-            
-        metadata = metadata or {}
-        
-        try:
-            # Generate the summary using LLM
-            summary = await self._generate_with_llm(content)
-            
-            # Log the summary to the daily log file
-            self._log_summary_to_file(summary, metadata)
-            
-            return summary
-            
-        except Exception as e:
-            logger.error(f"Error in generate_summary: {str(e)}")
-            # Return a basic fallback summary if anything goes wrong
-            return f"Summary: {content[:150]}..."
 
 # Create a global instance of the agent
 agent = SummaryAgent()

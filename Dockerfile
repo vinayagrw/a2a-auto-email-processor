@@ -17,11 +17,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p /app/data /app/output/templates /app/output/summaries
+RUN mkdir -p /app/data/chroma /app/output/templates /app/output/summaries /app/config
 
 # Set environment variables
 ENV PYTHONPATH=/app
 ENV A2A_SERVER_HOST=0.0.0.0
+ENV PYTHONUNBUFFERED=1
 
-# Default command
+# Default command (can be overridden in docker-compose)
 CMD ["python", "-m", "uvicorn", "agents.email_processor_agent:app", "--host", "0.0.0.0", "--port", "8001"]

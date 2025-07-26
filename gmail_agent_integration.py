@@ -180,7 +180,7 @@ async def get_latest_emails(service, max_results: int = 5) -> List[Dict[str, Any
         logger.error(f"Error fetching emails: {str(e)}")
         return []
 
-async def send_to_email_processor(email_data: Dict[str, Any], processor_url: str = "http://localhost:8001/process_email") -> None:
+async def send_to_email_processor(email_data: Dict[str, Any], processor_url: str = "http://host.docker.internal:8001/process_email") -> None:
     """Send email data to the email processor asynchronously."""
     try:
         # Convert datetime to ISO format for JSON serialization
