@@ -147,6 +147,14 @@ class SummaryAgent:
             
             # Set up agent card with service information
             service_url = f"http://{socket.gethostname()}:{self.service_port}"
+            # Register with A2A server using direct HTTP call
+            registration_data = {
+                "name": self.service_name,
+                "url": service_url,
+                "type": "agent",
+                "capabilities": ["summarization"]
+            }
+
             self.agent_card = {
                 "type": "agent",
                 "name": "Summary Agent",
@@ -155,14 +163,6 @@ class SummaryAgent:
                 "url": service_url,
                 "capabilities": ["summarization"],
                 "status": "ready"
-            }
-            
-            # Register with A2A server using direct HTTP call
-            registration_data = {
-                "name": self.service_name,
-                "url": service_url,
-                "type": "agent",
-                "capabilities": ["summarization"]
             }
             
             try:
@@ -181,10 +181,7 @@ class SummaryAgent:
                 error_msg = f"Failed to register with A2A server: {str(e)}"
                 logger.error(error_msg)
                 raise RuntimeError(error_msg) from e
-            
-            self.initialized = True
-            logger.info(f"Summary Agent initialized and registered with A2A server at {self.a2a_server_url}")
-            return True
+    
             
         except Exception as e:
             error_msg = f"Failed to initialize SummaryAgent: {str(e)}"
