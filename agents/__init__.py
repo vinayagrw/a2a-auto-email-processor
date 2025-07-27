@@ -7,7 +7,7 @@ This package contains the agent implementations for the A2A MCP Contractor Autom
 __version__ = "0.1.0"
 
 # Import configuration
-from .config import (
+from config import (
     BASE_DIR,
     DATA_DIR,
     OUTPUT_DIR,

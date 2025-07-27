@@ -29,35 +29,6 @@ from config import (
     OLLAMA_MODEL
 )
 
-# Configure logging
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(LOG_FILE)
-    ]
-)
-logger = logging.getLogger(__name__)
-
-# Parse command line arguments
-import argparse
-
-# Parse command line arguments first
-parser = argparse.ArgumentParser()
-parser.add_argument('--log-level', type=str.upper, default='DEBUG',
-                   choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-                   help='Set the logging level (DEBUG, INFO, WARNING, ERROR)')
-
-# Parse known args and ignore the rest to avoid conflicts with other argument parsers
-args, _ = parser.parse_known_args()
-
-# Convert log level from string to logging level
-try:
-    log_level = getattr(logging, args.log_level.upper())
-except (AttributeError, TypeError) as e:
-    print(f"Invalid log level: {args.log_level}. Defaulting to INFO")
-    log_level = logging.INFO
 
 # Set up logging directory
 BASE_DIR = Path(__file__).parent.parent
@@ -72,7 +43,7 @@ for handler in root_logger.handlers[:]:
 
 # Configure root logger
 logging.basicConfig(
-    level=log_level,
+    level=LOG_LEVEL.upper(),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.FileHandler(LOG_DIR / "summary_agent.log", mode='a'),  # Append to log file
@@ -82,8 +53,7 @@ logging.basicConfig(
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
-logger.info(f"Summary Agent logging initialized at level {args.log_level}")
-logger.debug("Debug logging is enabled")
+logger.info(f"Summary Agent logging initialized at level {LOG_LEVEL}")
 
 class SuccessResponse(BaseModel):
     success: bool = True
@@ -139,12 +109,6 @@ class SummaryAgent:
                 url=self.a2a_server_url
             )
             
-            # Initialize card resolver for service discovery
-            self.resolver = A2ACardResolver(
-                httpx_client=self.httpx_client,
-                base_url=self.a2a_server_url
-            )
-            
             # Set up agent card with service information
             service_url = f"http://{socket.gethostname()}:{self.service_port}"
             # Register with A2A server using direct HTTP call
@@ -157,7 +121,7 @@ class SummaryAgent:
 
             self.agent_card = {
                 "type": "agent",
-                "name": "Summary Agent",
+                "name": self.service_name,
                 "description": "Generates summaries of incoming requests",
                 "version": "1.0.0",
                 "url": service_url,
@@ -178,16 +142,17 @@ class SummaryAgent:
                 return True
                 
             except Exception as e:
-                error_msg = f"Failed to register with A2A server: {str(e)}"
-                logger.error(error_msg)
-                raise RuntimeError(error_msg) from e
+                logger.warning(f"Could not register with A2A server: {str(e)}")
     
             
         except Exception as e:
             error_msg = f"Failed to initialize SummaryAgent: {str(e)}"
             logger.error(error_msg, exc_info=True)
+            if self.httpx_client:
+                await self.httpx_client.aclose()
             self.initialized = False
             raise Exception(error_msg) from e
+    
 
     async def process_task_internal(self, task: TaskModel) -> Dict[str, Any]:
         """
@@ -461,10 +426,17 @@ def main():
     
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Run the Summary Agent')
-    parser.add_argument('--log-level', type=str, default='info',
+    parser.add_argument('--log_level', type=str, default=LOG_LEVEL,
                       choices=['debug', 'info', 'warning', 'error'],
                       help='Set the logging level')
     args = parser.parse_args()
+
+        # Convert log level string to logging level
+    log_level = getattr(logging, args.log_level.upper())
+    
+    
+    # Set uvicorn log level to match
+    uvicorn_log_level = args.log_level if args.log_level != 'debug' else LOG_LEVEL
     
 
     # Create the FastAPI app
@@ -480,7 +452,7 @@ def main():
         app,
         host="0.0.0.0",
         port=SUMMARY_AGENT_PORT,
-        log_level="debug"
+        log_level=uvicorn_log_level
     )
 
 

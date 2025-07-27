@@ -7,7 +7,7 @@ import httpx
 from config import OLLAMA_API_BASE, OLLAMA_MODEL, LOG_LEVEL
 
 # Configure logging
-logging.basicConfig(level=LOG_LEVEL)
+logging.basicConfig(level=LOG_LEVEL.upper())
 logger = logging.getLogger(__name__)
 
 class LLMClassifier:

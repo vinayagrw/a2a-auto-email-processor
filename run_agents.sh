@@ -2,10 +2,14 @@
 
 # Set the project root directory
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+echo "Project root: $PROJECT_ROOT"
 cd "$PROJECT_ROOT"
 
 # Create logs directory if it doesn't exist
 LOG_DIR="$PROJECT_ROOT/logs"
+
+rm -rf "$LOG_DIR"
+
 mkdir -p "$LOG_DIR"
 
 # Function to start an agent
@@ -16,7 +20,8 @@ start_agent() {
     
     echo "=== Starting $agent_name ===" | tee -a "$log_file"
     # Run with debug logging enabled
-    PYTHONPATH="$PROJECT_ROOT" python -m "agents.$agent_module" 2>&1 | tee -a "$log_file" &
+    PYTHONPATH="$PROJECT_ROOT" \
+    python -m "agents.$agent_module" --log_level debug 2>&1 | tee -a "$log_file" &
     echo "$!" > "$LOG_DIR/${agent_name}.pid"
     echo "Started $agent_name (PID: $(cat "$LOG_DIR/${agent_name}.pid"))"
     sleep 2

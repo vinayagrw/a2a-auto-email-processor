@@ -26,7 +26,8 @@ from config import (
     A2A_SERVER_HOST,
     A2A_SERVER_PORT,
     CHROMA_PERSIST_DIR,
-    EMAIL_PROCESSOR_AGENT_PORT
+    EMAIL_PROCESSOR_AGENT_PORT,
+    LOG_LEVEL
 )
 
 # Import LLM classifier
@@ -39,20 +40,20 @@ import argparse
 from pathlib import Path
 
 # Parse command line arguments first
-parser = argparse.ArgumentParser()
-parser.add_argument('--log-level', type=str.upper, default='DEBUG',
-                   choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-                   help='Set the logging level (DEBUG, INFO, WARNING, ERROR)')
+# parser = argparse.ArgumentParser()
+# parser.add_argument('--log-level', type=str.upper, default='DEBUG',
+#                    choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+#                    help='Set the logging level (DEBUG, INFO, WARNING, ERROR)')
 
 # Parse known args and ignore the rest to avoid conflicts with other argument parsers
-args, _ = parser.parse_known_args()
+# args, _ = parser.parse_known_args()
 
 # Convert log level from string to logging level
-try:
-    log_level = getattr(logging, args.log_level.upper())
-except (AttributeError, TypeError) as e:
-    print(f"Invalid log level: {args.log_level}. Defaulting to INFO")
-    log_level = logging.INFO
+# try:
+#     log_level = getattr(logging, args.log_level.upper())
+# except (AttributeError, TypeError) as e:
+#     print(f"Invalid log level: {args.log_level}. Defaulting to INFO")
+#     log_level = logging.INFO
 
 # Set up logging directory
 BASE_DIR = Path(__file__).parent.parent
@@ -67,7 +68,7 @@ for handler in root_logger.handlers[:]:
 
 # Configure root logger
 logging.basicConfig(
-    level=log_level,
+    level=LOG_LEVEL.upper(),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.FileHandler(LOG_DIR / "email_processor_agent.log", mode='a'),  # Append to log file
@@ -77,8 +78,6 @@ logging.basicConfig(
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
-logger.info(f"Email Processor Agent logging initialized at level {args.log_level}")
-logger.debug("Debug logging is enabled")
 
 # Models
 class SuccessResponse(BaseModel):
@@ -111,6 +110,8 @@ class EmailProcessorAgent:
         self.a2a_server_url = os.getenv("A2A_SERVER_URL", "http://a2a_server:8000")
         self.response_agent_service = "response_agent"
         self.summary_agent_service = "summary_agent"
+        self.service_port = int(os.getenv("EMAIL_PROCESSOR_PORT", "8001"))
+        self.service_name = "email_processor"
         
     async def initialize(self) -> bool:
         """
@@ -133,11 +134,10 @@ class EmailProcessorAgent:
             )
             
             # Set up service URL for registration
-            service_port = int(os.getenv("EMAIL_PROCESSOR_PORT", "8001"))
-            service_url = f"http://{socket.gethostname()}:{service_port}"
+            service_url = f"http://{socket.gethostname()}:{self.service_port}"
             # Register with A2A server using direct HTTP call
             registration_data = {
-                "name": "email_processor",
+                "name": self.service_name,
                 "url": service_url,
                 "type": "agent",
                 "capabilities": ["email_processing", "task_delegation"]
@@ -146,7 +146,7 @@ class EmailProcessorAgent:
             # Set up agent card with service information
             self.agent_card = {
                 "type": "agent",
-                "name": "Email Processor Agent",
+                "name": self.service_name,
                 "description": "Processes incoming emails and delegates tasks",
                 "version": "1.0.0",
                 "url": service_url,
@@ -155,7 +155,7 @@ class EmailProcessorAgent:
             }
             
             try:
-                response = await self.httpx_client.post(
+                response = await self.client.httpx_client.post(
                     f"{self.a2a_server_url}/services",
                     json=registration_data
                 )
@@ -583,14 +583,12 @@ def create_app() -> FastAPI:
         try:
             logger.info(f"Processing email from {email.sender} with subject: {email.subject}")
             result = await agent.process_email(email)
-            logger.info(f"Email processed successfully: {result}")
+            logger.info(f"Email processed successfully: {result.data}")
             return {
                 "success": True,
                 "message": "Email processed successfully",
                 "data": result
             }
-        except HTTPException as he:
-            raise he
         except Exception as e:
             error_msg = f"Failed to process email: {str(e)}"
             logger.error(error_msg, exc_info=True)
@@ -625,7 +623,7 @@ def main():
     
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Run the Email Processor Agent')
-    parser.add_argument('--log-level', type=str, default='info',
+    parser.add_argument('--log_level', type=str, default=LOG_LEVEL,
                       choices=['debug', 'info', 'warning', 'error'],
                       help='Set the logging level')
     args = parser.parse_args()
@@ -633,10 +631,9 @@ def main():
     # Convert log level string to logging level
     log_level = getattr(logging, args.log_level.upper())
     
-
     
     # Set uvicorn log level to match
-    uvicorn_log_level = args.log_level if args.log_level != 'debug' else 'debug'
+    uvicorn_log_level = args.log_level if args.log_level != 'debug' else LOG_LEVEL
     
     # Create the FastAPI app
     app = create_app()

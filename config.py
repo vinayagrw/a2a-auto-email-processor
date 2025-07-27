@@ -17,6 +17,14 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(DRAFTS_DIR, exist_ok=True)
 os.makedirs(SUMMARIES_DIR, exist_ok=True)
 
+
+# Email configuration
+GMAIL_API_CREDENTIALS = os.getenv("GMAIL_API_CREDENTIALS")
+GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+
+# AI Configuration
+LLM_URL = os.getenv("LLM_URL", "http://localhost:11434/api/generate")
+
 # A2A Server Configuration
 A2A_SERVER_HOST = os.getenv("A2A_SERVER_HOST", "0.0.0.0")
 A2A_SERVER_PORT = int(os.getenv("A2A_SERVER_PORT", "8000"))  # Default A2A server port
@@ -40,5 +48,5 @@ GMAIL_TOKEN_FILE = os.getenv("GMAIL_TOKEN_FILE", "token.json")
 GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
 # Logging Configuration
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "debug")
 LOG_FILE = os.getenv("LOG_FILE", str(LOGS_DIR / "a2a_mcp.log"))
