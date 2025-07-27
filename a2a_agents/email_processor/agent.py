@@ -7,6 +7,9 @@ from datetime import datetime
 from email.utils import parseaddr
 from typing import Any, AsyncGenerator, Dict, List
 
+import email
+from email.policy import default
+
 from pydantic import BaseModel, Field, field_validator
 
 # Add parent directory to path to allow absolute imports
@@ -71,7 +74,7 @@ class EmailProcessorAgent:
             self.initialized = False
             raise
 
-    async def _classify_email(self, email: EmailModel) -> Dict[str, Any]:
+    async def _classify_email(self, email) -> Dict[str, Any]:
         """Classify the email using LLM.
         
         Args:
@@ -84,8 +87,8 @@ class EmailProcessorAgent:
         try:
             # Get the intent from LLM
             intent = await self.llm_classifier.classify_email(
-                email_subject=email.subject,
-                email_body=email.body
+                email_subject=email   ,
+                email_body=email
             )
             
             # Map intent to priority and response requirements
@@ -144,10 +147,9 @@ class EmailProcessorAgent:
             }
         """
         try:
-            # Validate and parse email data
-            
+
             logger.info(f"Processing email data: {task_id}")
-            # Initial progress update
+
             yield {
                 'is_task_complete': False,
                 'task_state': 'working',
@@ -193,7 +195,7 @@ class EmailProcessorAgent:
                 'result': result,
                 'progress_percent': 100
             }
-            
+
         except Exception as e:
             error_message = f'Error processing email: {str(e)}'
             logger.error(error_message, exc_info=True)
@@ -206,3 +208,29 @@ class EmailProcessorAgent:
             }
 
             # Email processing completed
+    async def _parse_email_string(self, raw_email_string: str) -> Dict[str, Any]:
+        """Helper to parse raw email string into a structured dictionary."""
+        msg = email.message_from_string(raw_email_string, policy=default)
+
+        sender = msg['sender']
+        recipient = msg['recipients']
+        subject = msg['subject']
+
+        body_parts = []
+        if msg.is_multipart():
+            for part in msg.iter_parts():
+                # Skip attachments and non-text parts for simplicity
+                if part.get_content_maintype() == 'text':
+                    body_parts.append(part.get_payload(decode=True).decode(part.get_content_charset() or 'utf-8', errors='ignore'))
+        else:
+            if msg.get_content_maintype() == 'text':
+                body_parts.append(msg.get_payload(decode=True).decode(msg.get_content_charset() or 'utf-8', errors='ignore'))
+        
+        body = "\n\n".join(body_parts).strip()
+
+        return {
+            "sender": sender,
+            "recipient": recipient,
+            "subject": subject,
+            "body": body
+        }

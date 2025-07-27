@@ -1,6 +1,8 @@
 import logging
 from typing import Any, Dict, Optional, override, AsyncGenerator
 
+
+
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.server.tasks import TaskUpdater
@@ -35,15 +37,14 @@ class EmailProcessorAgentExecutor(AgentExecutor):
             context: The request context containing the email data
             event_queue: The event queue for sending updates
         """
-        logger.info(f"\nExecuting email processing task {context}")
+        
         query = context.get_user_input()
         task = context.current_task
+        logger.info(f"\nExecuting email processing task: {query}")
 
         if not task:
             task = new_task(context.message)
             await event_queue.enqueue_event(task)
-            
-        logger.info(f'Starting email processing task {task.id}')
 
         try:
             # Invoke the underlying agent with streaming results
@@ -184,3 +185,4 @@ class EmailProcessorAgentExecutor(AgentExecutor):
                 task.context_id if task else None,
                 task.id if task else None
             ))
+
