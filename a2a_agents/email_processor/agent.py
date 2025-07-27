@@ -9,8 +9,12 @@ from typing import Any, AsyncGenerator, Dict, List
 
 import email
 from email.policy import default
-
+from uuid import uuid4
+import httpx
+from datetime import timezone
 from pydantic import BaseModel, Field, field_validator
+from a2a.client import A2AClient
+from a2a.types import MessageSendParams, SendMessageRequest, SendStreamingMessageRequest, Message, Part
 
 # Add parent directory to path to allow absolute imports
 import sys
@@ -103,15 +107,12 @@ class EmailProcessorAgent:
                 'common_question': True,
                 'summary_needed': False
             }
-            
-            # Generate a summary (first 150 chars or full body if shorter)
-            summary = email[:150] + '...' if len(email) > 150 else email
+    
             
             return {
                 'category': intent,
                 'priority': priority_map.get(intent, 'normal'),
                 'requires_response': requires_response_map.get(intent, True),
-                'summary': summary,
                 'full_body': email  # Include full body for reference
             }
             
@@ -122,7 +123,6 @@ class EmailProcessorAgent:
                 'category': 'common_question',
                 'priority': 'normal',
                 'requires_response': True,
-                'summary': email[:150] + '...' if len(email) > 150 else email,
                 'full_body': email,
                 'error': str(e)
             }
@@ -172,26 +172,82 @@ class EmailProcessorAgent:
             
             # Here you would add more processing steps as needed
             # For example, extract entities, check against rules, etc.
-            
-            # Simulate additional processing
-            await asyncio.sleep(0.5)  # Simulate processing time
+            # Create send parameters
+
+            service_url = f"http://{os.getenv("SUMMARY_AGENT_HOST", "localhost")+":"+os.getenv("SUMMARY_AGENT_PORT", "8003")}" if classification['category'] not in ["quote_request", "common_question"] else f"http://{os.getenv("RESPONSE_AGENT_HOST", "localhost")+":"+os.getenv("RESPONSE_AGENT_PORT", "8002")}"  
+
+            logger.info(f"streaming to Service url: {service_url} for classification: {classification['category']} with priority: {classification['priority']}")
+
+            logger.info(f"Email data: {classification['full_body']}, \n type: {type(classification['full_body'])}")
+
+
+            message_ready = self.prepare_message(email=classification['full_body'], message_id=task_id)   
+
+            logger.info(f"Message ready: {message_ready}")
+
+            send_params = MessageSendParams(
+                message=message_ready,
+                configuration={
+                    'acceptedOutputModes': ['text'],
+                },
+            )
+            logger.info(f"Send parameters created: {send_params}")
+
+            async with httpx.AsyncClient() as httpx_client:
+            # Initialize A2A client directly
+                client = A2AClient(httpx_client=httpx_client, url=service_url)
+
+                request = SendStreamingMessageRequest(
+                    id=task_id,
+                    params=send_params
+                )
+                logger.info(f"Send request created: {request}")
+                stream_response = client.send_message_streaming(request)
+                async for chunk in stream_response:
+                    logger.info("response: " + chunk.model_dump_json(exclude_none=True, indent=2))
+                    res = chunk.model_dump_json(exclude_none=True, indent=2)
+                    res = json.loads(res)
+                    try:
+
+                        if "Response generated with LLM for prompt" in res['result']['artifact']['parts'][0]['text']:
+                            prefix_to_remove = "Response generated with LLM for prompt: "
+                            response_agent_result=str(res['result']['artifact']['parts'][0]['text']).removeprefix(prefix_to_remove).split('done')[0][:-4].split('response')[1][4:]
+                            
+                            logger.info(f"email response result: {response_agent_result}")
+                            break
+  
+                    except Exception as e:
+                        logger.info(f"resonse agent in processing")
+                        yield {                        
+                            'is_task_complete': False,
+                            'task_state': 'working',
+                            'content': f"{chunk.model_dump_json(exclude_none=True, indent=2)}",
+                            'progress': 60,
+                            'metadata': {'classification': classification,
+                            'agent': service_url}
+                        } 
+                        continue
+
             
             # Final result
             result = {
                 'task_id': task_id,
                 'classification': classification,
-                'processed_at': datetime.utcnow().isoformat(),
+                'processed_at': datetime.now(timezone.utc), 
+                'agent': service_url,
+                'response': response_agent_result,  
                 'actions': [{
                     'type': 'respond',
                     'priority': classification['priority'],
-                    'summary': classification['summary']
+                    'category': classification['category']
                 }]
             }
             
             yield {
                 'is_task_complete': True,
                 'task_state': 'completed',
-                'final_message_text': 'Email processing completed',
+                'final_message_text': response_agent_result,
+                'agent': service_url,
                 'result': result,
                 'progress_percent': 100
             }
@@ -234,3 +290,34 @@ class EmailProcessorAgent:
             "subject": subject,
             "body": body
         }
+
+    def prepare_message(self, email: str,message_id: str = uuid4().hex) -> Message:
+        """Create a properly formatted A2A message from an EmailModel.
+        
+        Args:
+            email: The email model to convert to a Message
+            
+        Returns:
+            A properly formatted Message object
+        """
+
+        
+        # Create message parts
+        parts = [
+            Part(
+                type="text/plain",
+                text=email,
+                metadata={}
+                   
+            )
+        ]
+
+        # Create and return the A2A message
+        return Message(
+            role="user",
+            message_id=message_id,
+            parts=parts,
+            metadata={}
+                
+            
+        )

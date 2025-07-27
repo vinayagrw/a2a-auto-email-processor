@@ -57,33 +57,67 @@ logging.basicConfig(
         force=True)
 logger = logging.getLogger(__name__)
 
+# def create_test_email() -> EmailModel:
+#     return EmailModel(
+#         subject="Request for Quote - Kitchen Renovation",
+#         sender="john.doe@example.com",
+#         recipients=["sales@contractor.com"],
+#         body="""Dear Sales Team,
+
+# I'm interested in getting a quote for a kitchen renovation project. 
+# The area is approximately 200 sq ft and we're looking to:
+# - Install new cabinets
+# - Replace countertops
+# - Update the backsplash
+# - Install new flooring
+
+# Please let me know your availability for a consultation.
+
+# Best regards,
+# John Doe
+# """,
+#         metadata={
+#             "priority": "normal",
+#             "labels": ["quote-request"]
+#         },
+#         received_at=datetime.now(timezone.utc),
+#         attachments=[]
+#     )
+
 def create_test_email() -> EmailModel:
     return EmailModel(
-        subject="Request for Quote - Kitchen Renovation",
-        sender="john.doe@example.com",
+        subject="Project Update: Q3 Marketing Campaign",
+        sender="vinay-123@example.com",
         recipients=["sales@contractor.com"],
-        body="""Dear Sales Team,
+        body="""Dear Team,
 
-I'm interested in getting a quote for a kitchen renovation project. 
-The area is approximately 200 sq ft and we're looking to:
-- Install new cabinets
-- Replace countertops
-- Update the backsplash
-- Install new flooring
+I hope this message finds you well. I wanted to provide an update on our Q3 Marketing Campaign progress.
 
-Please let me know your availability for a consultation.
+1. Social Media: We've achieved 75% of our Q3 engagement goals across all platforms, with particularly strong performance on LinkedIn (up 23% from Q2).
+
+2. Email Campaigns: Our open rates have improved to 28.5%, exceeding our target of 25%. Click-through rates are at 4.2%, slightly below our 5% goal.
+
+3. Web Traffic: We've seen a 15% increase in organic traffic month-over-month, with the new blog content performing exceptionally well.
+
+4. Upcoming Initiatives:
+   - Launch of the new product demo video (scheduled for next week)
+   - Webinar series on industry trends (registration now open)
+   - Case study featuring our work with Client X (in final review)
+
+5. Challenges:
+   - Some delays in content approval process
+   - Lower-than-expected conversion from social media traffic
+
+Please review the attached detailed report and let me know if you have any questions or need additional information.
 
 Best regards,
-John Doe
-""",
+Sarah Johnson
+Marketing Director""",
         metadata={
-            "priority": "normal",
-            "labels": ["quote-request"]
-        },
-        received_at=datetime.now(timezone.utc),
-        attachments=[]
+            "priority": "high",
+            "category": "marketing"
+        }
     )
-
 
 def create_email_message(email: EmailModel) -> Message:
     """Create a properly formatted A2A message from an EmailModel.
@@ -94,20 +128,13 @@ def create_email_message(email: EmailModel) -> Message:
     Returns:
         A properly formatted Message object
     """
-    # Create email content in RFC822 format
-    email_content = f"""From: {email.sender}
-To: {', '.join(email.recipients)}
-Subject: {email.subject}
-Date: {email.received_at.strftime('%a, %d %b %Y %H:%M:%S %z')}
-Message-ID: <{email.id}>
 
-{email.body}"""
     
     # Create message parts
     parts = [
         Part(
             type="text/plain",
-            text=email_content.strip(),
+            text=f"""{email}""",
             metadata={
                 "email_metadata": {
                     "subject": email.subject,
