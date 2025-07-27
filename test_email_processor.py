@@ -1,121 +1,349 @@
-import os
-import base64
+import asyncio
 import json
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
+import logging
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
+from uuid import uuid4
+
+import asyncclick as click
 import httpx
-from pprint import pprint
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field
 
-# If modifying these scopes, delete the token.json file.
-SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+from a2a.client import A2AClient, A2ACardResolver
+from a2a.types import (
+    AgentCard,
+    GetTaskRequest,
+    Message,
+    MessageSendParams,
+    SendMessageRequest,
+    SendStreamingMessageRequest,
+    Task,
+    TaskArtifactUpdateEvent,
+    TaskQueryParams,
+    TaskState,
+    TaskStatusUpdateEvent,
+    TextPart,
+    Part,
+    Role,
+)
 
-def get_gmail_service():
-    """Shows basic usage of the Gmail API.
-    Lists the user's Gmail labels.
+# Load environment variables if .env file exists
+if os.path.exists('.env'):
+    load_dotenv()
+
+
+# Email model to match the agent's expected input
+class EmailModel(BaseModel):
+    """Model representing an email message."""
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    subject: str
+    sender: str
+    recipients: List[str]
+    body: str
+    received_at: datetime = Field(default_factory=datetime.utcnow)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    attachments: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+logging.basicConfig(
+        level=logging.DEBUG,
+        handlers=[logging.StreamHandler()],
+        format='%(asctime)s - %(name)s - %(pathname)s - %(lineno)d - %(levelname)s - %(message)s',
+        force=True)
+logger = logging.getLogger(__name__)
+
+def create_test_email() -> EmailModel:
+    return EmailModel(
+        subject="Request for Quote - Kitchen Renovation",
+        sender="john.doe@example.com",
+        recipients=["sales@contractor.com"],
+        body="""Dear Sales Team,
+
+I'm interested in getting a quote for a kitchen renovation project. 
+The area is approximately 200 sq ft and we're looking to:
+- Install new cabinets
+- Replace countertops
+- Update the backsplash
+- Install new flooring
+
+Please let me know your availability for a consultation.
+
+Best regards,
+John Doe
+""",
+        metadata={
+            "priority": "normal",
+            "labels": ["quote-request"]
+        },
+        received_at=datetime.now(timezone.utc),
+        attachments=[]
+    )
+
+
+def create_email_message(email: EmailModel) -> Message:
+    """Create a properly formatted A2A message from an EmailModel.
+    
+    Args:
+        email: The email model to convert to a Message
+        
+    Returns:
+        A properly formatted Message object
     """
-    creds = None
-    # The file token.json stores the user's access and refresh tokens
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-    
-    # If there are no (valid) credentials, let the user log in.
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                'credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
-        # Save the credentials for the next run
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
+    # Create email content in RFC822 format
+    email_content = f"""From: {email.sender}
+To: {', '.join(email.recipients)}
+Subject: {email.subject}
+Date: {email.received_at.strftime('%a, %d %b %Y %H:%M:%S %z')}
+Message-ID: <{email.id}>
 
-    service = build('gmail', 'v1', credentials=creds)
-    return service
-
-def get_latest_emails(service, max_results=5):
-    """Get the latest emails from Gmail."""
-    results = service.users().messages().list(
-        userId='me', 
-        maxResults=max_results
-    ).execute()
+{email.body}"""
     
-    messages = results.get('messages', [])
-    emails = []
-    
-    for msg in messages:
-        txt = service.users().messages().get(
-            userId='me',
-            id=msg['id']
-        ).execute()
-        
-        # Get headers
-        headers = txt.get('payload', {}).get('headers', [])
-        subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
-        sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown Sender')
-        date = next((h['value'] for h in headers if h['name'] == 'Date'), 'Unknown Date')
-        
-        # Get message body
-        try:
-            if 'parts' in txt['payload']:
-                data = txt['payload']['parts'][0]['body']['data']
-            else:
-                data = txt['payload']['body']['data']
-            body = base64.urlsafe_b64decode(data).decode('utf-8')
-        except:
-            body = "Could not decode email body"
-        
-        emails.append({
-            'id': msg['id'],
-            'subject': subject,
-            'sender': sender,
-            'date': date,
-            'snippet': txt.get('snippet', ''),
-            'body': body
-        })
-        
-    return emails
-
-async def send_to_summary_agent(email_data):
-    """Send email data to the summary agent."""
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "http://localhost:8003/process_task",
-            json={
-                "id": email_data['id'],
-                "artifacts": [{
-                    "type": "email",
-                    "content": json.dumps({
-                        "subject": email_data['subject'],
-                        "sender": email_data['sender'],
-                        "body": email_data['body']
-                    }),
-                    "metadata": {
-                        "date": email_data['date'],
-                        "snippet": email_data['snippet']
-                    }
-                }]
+    # Create message parts
+    parts = [
+        Part(
+            type="text/plain",
+            text=email_content.strip(),
+            metadata={
+                "email_metadata": {
+                    "subject": email.subject,
+                    "from": email.sender,
+                    "to": email.recipients,
+                    "date": email.received_at.isoformat(),
+                    "message_id": email.id
+                }
             }
         )
-        return response.json()
-
-async def main():
-    # Get Gmail service
-    service = get_gmail_service()
+    ]
     
-    # Get latest emails
-    print("Fetching latest emails...")
-    emails = get_latest_emails(service, max_results=3)
+    # Add attachments if any
+    for idx, attachment in enumerate(email.attachments, 1):
+        parts.append(
+            Part(
+                type=attachment.get("content_type", "application/octet-stream"),
+                text=attachment.get("content", ""),
+                metadata={
+                    "filename": attachment.get("filename", f"attachment_{idx}"),
+                    "size": len(attachment.get("content", "")),
+                    "disposition": "attachment"
+                }
+            )
+        )
     
-    # Process each email with the summary agent
-    for email in emails:
-        print(f"\nProcessing email: {email['subject']}")
-        result = await send_to_summary_agent(email)
-        print("Summary Agent Response:")
-        pprint(result)
+    # Create and return the A2A message
+    return Message(
+        role="user",
+        message_id=str(uuid4()),
+        parts=parts,
+        metadata={
+            "email": {
+                "id": email.id,
+                "subject": email.subject,
+                "received_at": email.received_at.isoformat(),
+                **email.metadata
+            }
+        }
+    )
 
-if __name__ == '__main__':
+
+async def process_email(client: A2AClient, email: EmailModel, streaming: bool = True, debug: bool = False) -> bool:
+    """Process an email using the email processor agent."""
+    try:
+        # Create the A2A message
+        message = create_email_message(email)
+        logger.info(f"\nEmail message created: {message}")
+        
+        # Create send parameters
+        send_params = MessageSendParams(
+            message=message,
+            configuration={
+                'acceptedOutputModes': ['text'],
+            },
+        )
+        logger.info(f"\nSend parameters created: {send_params}")
+        
+        task_id = str(uuid4())
+        logger.info(f"\nTask ID: {task_id}")
+
+ 
+        
+        if streaming:
+            # Process with streaming
+            logger.info("\nProcessing with streaming...")
+            request = SendStreamingMessageRequest(
+                id=task_id,
+                params=send_params
+            )
+            logger.info(f"\nSend request created: {request}")
+            stream_response = client.send_message_streaming(request)
+            async for chunk in stream_response:
+                logger.info("response: " + chunk.model_dump_json(exclude_none=True, indent=2))
+            return True
+        else:
+            logger.info("\nProcessing without streaming...")
+            # Process without streaming
+            request = SendMessageRequest(
+                id=task_id,
+                params=send_params
+            )
+            
+            response = await client.send_message(request)
+            task = response.root.result
+            logger.info(f"\nTask completed: {task.status.state}")
+            logger.info(f"Result: {task.model_dump_json(exclude_none=True, indent=2)}")
+            
+    except Exception as e:
+        logger.error(f"\n Error processing email: {e}")
+        if debug:
+            import traceback
+            traceback.print_exc()
+        return False
+    
+
+def create_send_params(
+    text: str, task_id: str | None = None, context_id: str | None = None
+) -> MessageSendParams:
+    """Helper function to create the payload for sending a task."""
+    send_params: dict[str, Any] = {
+        'message': {
+            'role': 'user',
+            'parts': [{'type': 'text', 'text': text}],
+            'messageId': str(uuid4()),
+        },
+        'configuration': {
+            'acceptedOutputModes': ['text'],
+        },
+    }
+
+    if task_id:
+        send_params['message']['taskId'] = task_id
+
+    if context_id:
+        send_params['message']['contextId'] = context_id
+
+    return MessageSendParams(**send_params)
+
+
+async def test_streaming_connection(client: A2AClient, message: Message) -> bool:
+    """Test if the streaming connection works with the given message."""
+    logger.info("Testing streaming connection...")
+    
+    try:
+        # Create a streaming request
+        request = SendStreamingMessageRequest(
+            params=MessageSendParams(message=message)
+        )
+        
+        # Try to open a streaming connection
+        async with client.send_message_streaming(request) as stream:
+            logger.info("Streaming connection established")
+            
+            # Read the first chunk to verify it's working
+            try:
+                chunk = await asyncio.wait_for(stream.__anext__(), timeout=5.0)
+                logger.info(f"Received first chunk: {chunk}")
+                return True
+            except asyncio.TimeoutError:
+                logger.warning("Timeout waiting for first chunk")
+                return False
+                
+    except A2AClientError as e:
+        logger.error(f"A2A client error during streaming test: {e}")
+        return False
+    except Exception as e:
+        logger.exception("Unexpected error during streaming test")
+        return False
+
+
+async def check_agent_endpoints(agent_url: str) -> bool:
+    """Check if agent endpoints are accessible."""
+    endpoints = [
+        f"{agent_url}/.well-known/agent.json",
+        f"{agent_url}/openapi.json",
+        f"{agent_url}/docs"
+    ]
+    
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        for endpoint in endpoints:
+            try:
+                logger.debug(f"Testing endpoint: {endpoint}")
+                response = await client.get(endpoint)
+                if response.status_code == 200:
+                    logger.info(f" Successfully connected to {endpoint}")
+                    return True
+            except Exception as e:
+                logger.warning(f" Could not connect to {endpoint}: {str(e)}")
+    return False
+
+
+@click.command()
+@click.option('--agent', default='http://localhost:8001', help='Agent URL')
+@click.option('--streaming/--no-streaming', default=True, help='Use streaming API')
+@click.option('--debug', is_flag=True, help='Enable debug output')
+async def main(agent: str, streaming: bool, debug: bool):
+    """Test the Email Processor agent."""
+    # Set up logging
+
+    
+    try:
+        # Initialize HTTP client
+        async with httpx.AsyncClient() as httpx_client:
+            # Initialize A2A client directly
+            client = A2AClient(httpx_client=httpx_client, url=agent)
+            
+            logger.info('\n' + '='*80)
+            logger.info(f' Testing Email Processor Agent at {agent}')
+            logger.info('='*80)
+            
+            # # Create test email
+            email = create_test_email()
+            logger.info(f"\nTest email created with ID: {email}")
+            
+            
+            # Process the email
+            success = await process_email(
+                client=client,
+                email=email,
+                streaming=streaming,
+                debug=debug
+            )
+            
+            if success:
+
+                logger.info('✅ Test completed successfully!')
+
+                return 0
+            else:
+                logger.error('\n' + '❌'*30)
+                
+                return 1
+                
+    except Exception as e:
+        logger.error(f'Error: {e}', exc_info=debug)
+        return 1
+
+
+# Initialize logger at module level
+logger = logging.getLogger(__name__)
+
+if __name__ == "__main__":
     import asyncio
-    asyncio.run(main())
+    import sys
+    
+
+    # Log startup
+    logger.info("Starting test script...")
+    logger.debug("Debug mode enabled")
+    
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Test script interrupted by user")
+        sys.exit(1)
+    except Exception as e:
+        logger.critical(f"Unhandled exception: {e}", exc_info=True)
+        sys.exit(1)

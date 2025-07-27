@@ -20,6 +20,7 @@ from config import (
     EMAIL_PROCESSOR_AGENT_PORT,
     RESPONSE_AGENT_PORT,
     SUMMARY_AGENT_PORT,
+    LOG_LEVEL
 )
 
 from .email_processor_agent import create_app as create_email_processor_app

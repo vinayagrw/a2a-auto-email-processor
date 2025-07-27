@@ -3,7 +3,11 @@ from setuptools import setup, find_packages
 setup(
     name="a2a-mcp-contractor-automation",
     version="0.1.0",
-    packages=find_packages(),
+    packages=find_packages(include=['a2a_agents*', 'utils*']),
+    package_dir={
+        'a2a_agents': 'a2a_agents',
+        'utils': 'utils'
+    },
     install_requires=[
         "fastapi",
         "uvicorn",
