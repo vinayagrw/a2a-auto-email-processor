@@ -341,11 +341,11 @@ async def main(agent: str, streaming: bool, debug: bool):
             
             if success:
 
-                logger.info('✅ Test completed successfully!')
+                logger.info('Test completed successfully!')
 
                 return 0
             else:
-                logger.error('\n' + '❌'*30)
+                logger.error("failed")
                 
                 return 1
                 

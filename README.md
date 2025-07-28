@@ -17,19 +17,6 @@ The system follows a microservices architecture where each agent is an independe
 ![Architecture](.gitbook/architecture.png)
 
 
-
-```
-                                                     ┌──────────────────┐  
-                                                     │   Response Agent │
-                                                     └──────────────────┘
- ┌─────────────────┐        ┌─────────────────┐        
- │   Gmail API     │─────▶ │  Email Processor│────▶
- └─────────────────┘        └─────────────────┘     
-                                                    ┌─────────────────┐
-                                                    │   Summary Agent │
-                                                    └─────────────────┘
-```
-
 ## Agent Communication Flow
 
 1. **Email Processor**
@@ -51,6 +38,18 @@ The system follows a microservices architecture where each agent is an independe
 ## A2A Framework Implementation
 
 The system leverages Google's A2A (Agent-to-Agent) framework, which provides:
+
+```
+                                                     ┌──────────────────┐  
+                                                     │   Response Agent │
+                                                     └──────────────────┘
+ ┌─────────────────┐        ┌─────────────────┐        
+ │   Gmail API     │─────▶ │  Email Processor│────▶
+ └─────────────────┘        └─────────────────┘     
+                                                    ┌─────────────────┐
+                                                    │   Summary Agent │
+                                                    └─────────────────┘
+```
 
 ### Core A2A Features
 
@@ -124,6 +123,92 @@ The server responds with a stream of Server-Sent Events (SSE), where each event 
 - **Invalid Messages**: Log and skip malformed events
 - **Rate Limiting**: Respect Retry-After headers
 - **Timeouts**: Implement appropriate timeouts for both connection and response streaming
+
+## Gmail Integration
+
+The system includes a robust Gmail integration component that enables automated email processing through the Gmail API. This component is implemented in `gmail_agent_integration.py`.
+
+### Key Features
+
+- **Email Retrieval**: Fetches emails from Gmail using the Gmail API
+- **Email Processing**: Converts Gmail messages into a standardized format
+- **Attachment Handling**: Extracts and processes email attachments
+- **A2A Integration**: Seamlessly integrates with the A2A agent framework
+- **Error Handling**: Comprehensive error handling and retry mechanisms
+
+### Configuration
+
+1. **Gmail API Credentials**:
+   - Create a project in Google Cloud Console
+   - Enable the Gmail API
+   - Create OAuth 2.0 credentials
+   - Download the credentials JSON file as `credentials.json`
+
+2. **Environment Variables**:
+   ```
+   GOOGLE_APPLICATION_CREDENTIALS=path/to/credentials.json
+   EMAIL_PROCESSOR_URL=http://localhost:8001
+   A2A_AGENT_URL=http://localhost:8001
+   PROCESSING_INTERVAL=300  # seconds
+   ```
+
+### Usage
+
+```bash
+python gmail_agent_integration.py
+```
+
+![Architecture](.gitbook/img.png)
+
+## Test Email Processor
+
+The `test_email_processor.py` script provides a testing framework for the email processor agent, allowing you to validate the email processing pipeline without sending actual emails.
+
+### Features
+
+- **Test Email Generation**: Creates realistic test email payloads
+- **Streaming Support**: Tests both streaming and non-streaming modes
+- **Debugging Tools**: Detailed logging and error reporting
+- **Endpoint Validation**: Verifies agent endpoints are accessible
+
+### Usage
+
+```bash
+# Test with streaming (default)
+python test_email_processor.py --agent http://localhost:8001
+
+# Test without streaming
+python test_email_processor.py --agent http://localhost:8001 
+
+# Enable debug output
+python test_email_processor.py --agent http://localhost:8001 --debug
+```
+
+### Test Email Payload
+
+The test script generates emails with the following structure:
+
+```python
+{
+    "id": "unique-email-id",
+    "subject": "Test Email Subject",
+    "sender": "test@example.com",
+    "recipients": ["recipient@example.com"],
+    "body": "This is a test email body.",
+    "received_at": "2025-07-27T22:00:00Z",
+    "metadata": {
+        "thread_id": "test-thread-123",
+        "labels": ["INBOX", "UNREAD"]
+    },
+    "attachments": [
+        {
+            "filename": "test.txt",
+            "mime_type": "text/plain",
+            "size": 1024
+        }
+    ]
+}
+```
 
 - **Service Discovery**: Automatic discovery of available agents
 - **Standardized Communication**: Unified API for inter-agent communication
@@ -218,6 +303,89 @@ The system implements a comprehensive error handling strategy:
 2. **Retry Logic**: Transient failures are automatically retried
 3. **Circuit Breaker**: Prevents cascading failures
 4. **Dead Letter Queue**: Failed messages are stored for later analysis
+
+## Gmail Integration Setup
+
+### Prerequisites
+1. A Google Cloud Platform (GCP) project with the Gmail API enabled
+2. OAuth 2.0 credentials configured in the GCP Console
+3. Required Python packages: `google-api-python-client`, `google-auth-oauthlib`, `google-auth-httplib2`
+
+### Configuration
+
+1. **Enable Gmail API**
+   - Go to [Google Cloud Console](https://console.cloud.google.com/)
+   - Create a new project or select an existing one
+   - Enable the Gmail API
+   - Configure the OAuth consent screen
+   - Create OAuth 2.0 credentials (OAuth client ID)
+   - Download the credentials JSON file as `credentials.json`
+
+2. **Environment Variables**
+   Add these to your `.env` file:
+   ```
+   GMAIL_CREDENTIALS_PATH=./config/credentials.json
+   GMAIL_TOKEN_PATH=./config/token.json
+   GMAIL_SCOPES=https://www.googleapis.com/auth/gmail.modify
+   ```
+
+3. **First-Time Authorization**
+   Run the authentication flow:
+   ```bash
+   python -m a2a_agents.utils.gmail_auth
+   ```
+   - This will open a browser window for Google OAuth authentication
+   - After authenticating, a `token.json` file will be generated
+
+## Running Mistral Locally with Ollama
+
+### Prerequisites
+1. Install [Ollama](https://ollama.ai/)
+2. Install the Mistral model
+
+### Setup Instructions
+
+1. **Install Ollama**
+   - Windows:
+     ```powershell
+     winget install ollama
+     ```
+   - macOS:
+     ```bash
+     brew install ollama
+     ```
+   - Linux:
+     ```bash
+     curl -fsSL https://ollama.ai/install.sh | sh
+     ```
+
+2. **Download Mistral Model**
+   ```bash
+   ollama pull mistral
+   ```
+
+3. **Run Ollama Server**
+   ```bash
+   ollama serve
+   ```
+   This will start the server on `http://localhost:11434`
+
+4. **Configure the Application**
+   Update your `.env` file:
+   ```
+   LLM_API_KEY=ollama
+   LLM_BASE_URL=http://localhost:11434
+   LLM_MODEL=mistral
+   ```
+
+5. **Test the Setup**
+   ```python
+   from utils.llm_client import LLMClient
+   
+   llm = LLMClient()
+   response = llm.generate("Hello, how are you?")
+   print(response)
+   ```
 
 ## Monitoring and Logging
 
@@ -348,23 +516,6 @@ a2a_agents/
 └── pyproject.toml       # Project dependencies
 ```
 
-### Setting Up the Development Environment
-
-1. **Install Dependencies**
-   ```bash
-   poetry install
-   ```
-
-2. **Set Up Pre-commit Hooks**
-   ```bash
-   pre-commit install
-   ```
-
-3. **Configure Environment**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
 
 ### Running Tests
 
@@ -401,8 +552,10 @@ This project uses:
 2. **Docker Container Issues**
    ```bash
    # Rebuild and restart all services
-   docker-compose down
+
    docker-compose up --build -d
+
+   docker-compose down
    ```
 
 3. **LLM Connection Issues**
@@ -433,17 +586,6 @@ docker-compose logs --tail=100
 # Follow logs in real-time
 docker-compose logs -f --tail=50
 ```
-
-
-
-
-## Future Enhancements
-
-- Support for additional communication channels (Slack, Teams)
-- Advanced analytics dashboard
-- Automated testing framework
-- Enhanced security features
-- Multi-tenant support
 
 
 

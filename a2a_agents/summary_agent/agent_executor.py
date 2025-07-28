@@ -22,7 +22,7 @@ from a2a.types import (
 )
 from a2a.utils import new_agent_text_message, new_task, new_text_artifact
 
-from agent import SummaryAgent
+from a2a_agents.summary_agent.agent import SummaryAgent
 
 logger = logging.getLogger(__name__)
 

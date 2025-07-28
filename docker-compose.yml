@@ -1,44 +1,29 @@
-version: '3.8'
+# Docker Compose file for A2A MCP Contractor Automation
+# Uses host.docker.internal to connect to services on the host machine
 
 services:
-  a2a_server:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: sh -c "python -m a2a.server"
-    ports:
-      - "8000:8000"
-    environment:
-      - A2A_SERVER_HOST=0.0.0.0
-      - A2A_SERVER_PORT=8000
-      - PYTHONUNBUFFERED=1
-    volumes:
-      - ./a2a:/app/a2a
-    networks:
-      - agent-network
-    restart: unless-stopped
-
+  # Email Processor Agent
   email_processor:
     build:
       context: .
       dockerfile: Dockerfile
-    command: sh -c "python -m agents.email_processor_agent"
+    command: python -m a2a_agents.email_processor.__main__ --host 0.0.0.0 --port 8001
     ports:
       - "8001:8001"
     environment:
-      - A2A_SERVER_HOST=a2a_server
-      - A2A_SERVER_PORT=8000
-      - EMAIL_PROCESSOR_AGENT_PORT=8001
-      - RESPONSE_AGENT_PORT=8002
-      - SUMMARY_AGENT_PORT=8003
-      - LLM_URL=http://host.docker.internal:11434/api
-      - CHROMA_PERSIST_DIR=/app/data/chroma
-      - PYTHONUNBUFFERED=1
-      - PYTHONPATH=/app
-      - RESPONSE_AGENT_URL=http://response_agent:8002
-      - SUMMARY_AGENT_URL=http://summary_agent:8003
+      LLM_URL: ${LLM_URL:-http://host.docker.internal:11434/api}
+      A2A_SERVER_URL: ${A2A_SERVER_URL:-http://host.docker.internal:8000}
+      SUMMARY_AGENT_HOST: host.docker.internal
+      RESPONSE_AGENT_HOST: host.docker.internal
+      PYTHONUNBUFFERED: 1
+      PYTHONPATH: /app
+      A2A_SERVER_HOST: 0.0.0.0
+      EMAIL_PROCESSOR_AGENT_PORT: 8001
+      RESPONSE_AGENT_PORT: 8002
+      SUMMARY_AGENT_PORT: 8003
+      CHROMA_PERSIST_DIR: /app/data/chroma
     volumes:
-      - ./agents:/app/agents
+      - .:/app
       - ./data:/app/data
       - ./output:/app/output
       - ./config:/app/config
@@ -46,84 +31,97 @@ services:
       - "host.docker.internal:host-gateway"
     networks:
       - agent-network
-    restart: unless-stopped
+    restart: unless-stopped      
 
+  # Response Agent
   response_agent:
     build:
       context: .
       dockerfile: Dockerfile
-    command: sh -c "python -m agents.response_agent"
+    command: python -m a2a_agents.response_agent.__main__ --host 0.0.0.0 --port 8002
     ports:
       - "8002:8002"
     environment:
-      - A2A_SERVER_HOST=a2a_server
-      - A2A_SERVER_PORT=8000
-      - RESPONSE_AGENT_PORT=8002
-      - EMAIL_PROCESSOR_AGENT_PORT=8001
-      - SUMMARY_AGENT_PORT=8003
-      - LLM_URL=http://host.docker.internal:11434/api
-      - PYTHONUNBUFFERED=1
-      - PYTHONPATH=/app
-      - EMAIL_PROCESSOR_AGENT_URL=http://email_processor:8001
-      - SUMMARY_AGENT_URL=http://summary_agent:8003
+      LLM_URL: ${LLM_URL:-http://host.docker.internal:11434/api}
+      A2A_SERVER_URL: ${A2A_SERVER_URL:-http://host.docker.internal:8000}
+      PYTHONUNBUFFERED: 1
+      PYTHONPATH: /app
+      A2A_SERVER_HOST: 0.0.0.0
+      RESPONSE_AGENT_HOST: 0.0.0.0
+      RESPONSE_AGENT_PORT: 8002
+      EMAIL_PROCESSOR_AGENT_PORT: 8001
+      SUMMARY_AGENT_PORT: 8003
+      CHROMA_PERSIST_DIR: /app/data/chroma
     volumes:
-      - ./agents:/app/agents
+      - .:/app
       - ./data:/app/data
       - ./output:/app/output
       - ./config:/app/config
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    depends_on:
-      - email_processor
     networks:
       - agent-network
-    restart: unless-stopped
+    restart: unless-stopped    
 
+  # Summary Agent
   summary_agent:
     build:
       context: .
       dockerfile: Dockerfile
-    command: sh -c "python -m agents.summary_agent"
+    command: python -m a2a_agents.summary_agent.__main__ --host 0.0.0.0 --port 8003
     ports:
       - "8003:8003"
     environment:
-      - A2A_SERVER_HOST=a2a_server
-      - A2A_SERVER_PORT=8000
-      - SUMMARY_AGENT_PORT=8003
-      - EMAIL_PROCESSOR_AGENT_PORT=8001
-      - RESPONSE_AGENT_PORT=8002
-      - LLM_URL=http://host.docker.internal:11434/api
-      - PYTHONUNBUFFERED=1
-      - PYTHONPATH=/app
+      LLM_URL: ${LLM_URL:-http://host.docker.internal:11434/api}
+      A2A_SERVER_URL: ${A2A_SERVER_URL:-http://host.docker.internal:8000}
+      PYTHONUNBUFFERED: 1
+      PYTHONPATH: /app
+      A2A_SERVER_HOST: 0.0.0.0
+      SUMMARY_AGENT_PORT: 8003
+      EMAIL_PROCESSOR_AGENT_PORT: 8001
+      RESPONSE_AGENT_PORT: 8002
+      CHROMA_PERSIST_DIR: /app/data/chroma
     volumes:
-      - ./agents:/app/agents
+      - .:/app
+      - ./data:/app/data
       - ./output:/app/output
       - ./config:/app/config
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    depends_on:
-      - a2a_server
-      - email_processor
-      - response_agent
     networks:
       - agent-network
-    restart: unless-stopped
+    restart: unless-stopped    
 
-  chroma_viewer:
-    build:
-      context: ./chroma_viewer
-      dockerfile: Dockerfile
+  # ChromaDB for vector storage
+  chromadb:
+    image: chromadb/chroma:latest
     ports:
-      - "5000:5000"
+      - "8004:8000"
     volumes:
-      - ./data/chroma:/data/chroma
+      - chroma_data:/chroma/chroma
     environment:
-      - CHROMA_DB_PATH=/data/chroma
-    depends_on:
-      - email_processor
-    networks:
-      - agent-network
-    restart: unless-stopped
+      - IS_PERSISTENT=TRUE
+      - ALLOW_RESET=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+x-common-env: &common-env
+  HOST_IP: ${HOST_IP:-host.docker.internal}
+  LLM_URL: http://${HOST_IP:-host.docker.internal}:11434/api
+  A2A_SERVER_URL: http://${HOST_IP:-host.docker.internal}:8000
+  SUMMARY_AGENT_HOST: host.docker.internal
+  RESPONSE_AGENT_HOST: host.docker.internal
+  EMAIL_PROCESSOR_AGENT_HOST: host.docker.internal
+  PYTHONUNBUFFERED: 1
+  PYTHONPATH: /app
+
+volumes:
+  chroma_data:
 
 networks:
   agent-network:

@@ -15,7 +15,7 @@ from a2a.types import (
 )
 from a2a.utils import new_agent_text_message, new_task, new_text_artifact
 
-from agent import EmailProcessorAgent
+from a2a_agents.email_processor.agent import EmailProcessorAgent
 
 logger = logging.getLogger(__name__)
 
@@ -54,13 +54,13 @@ class EmailProcessorAgentExecutor(AgentExecutor):
                 if event.get('is_task_complete', False):
                     # Handle task completion
                     retrieved_full_llm_response_object = event.get('result')
-                    classification = event.get('result', {}).get('classification', {})
-                    print("\n" + "="*80)
+                    classification = event.get('result', {}).get('classification', {}).get('category', '')
+                    logger.info("\n" + "="*80)
                     final_llm_generated_text = event.get('final_message_text', '')
                     logger.info(f"Task completed for task ID: {task.id}")
                     logger.info(f"Final LLM generated text: {final_llm_generated_text}")
                     logger.info(f"Email Classification: {classification}")
-                    print("\n" + "="*80)
+                    logger.info("\n" + "="*80)
                     # logger.info(f"Full LLM response object: {retrieved_full_llm_response_object}")
                     
                     await event_queue.enqueue_event(
