@@ -1,4 +1,4 @@
-a2a-sdk[grpc]
+a2a-sdk[grpc]>=0.2.16
 python-dotenv
 fastapi
 uvicorn
@@ -10,3 +10,6 @@ google-auth-oauthlib
 python-multipart
 pydantic
 httpx
+chromadb
+pydantic[email]
+jinja2

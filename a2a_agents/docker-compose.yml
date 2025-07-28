@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  # A2A Server
+  a2a_server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn a2a.server.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+    volumes:
+      - .:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # Email Processor Agent
+  email_processor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m a2a_agents.email_processor.__main__
+    ports:
+      - "8001:8001"
+    environment:
+      - A2A_SERVER_URL=http://a2a_server:8000
+      - EMAIL_PROCESSOR_PORT=8001
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+    volumes:
+      - .:/app
+    depends_on:
+      a2a_server:
+        condition: service_healthy
+
+  # Response Agent
+  response_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m a2a_agents.response_agent.__main__
+    ports:
+      - "8002:8002"
+    environment:
+      - A2A_SERVER_URL=http://a2a_server:8000
+      - RESPONSE_AGENT_PORT=8002
+      - OLLAMA_API_BASE=http://host.docker.internal:11434
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+    volumes:
+      - .:/app
+    depends_on:
+      a2a_server:
+        condition: service_healthy
+
+  # Summary Agent
+  summary_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m a2a_agents.summary_agent.__main__
+    ports:
+      - "8003:8003"
+    environment:
+      - A2A_SERVER_URL=http://a2a_server:8000
+      - SUMMARY_AGENT_PORT=8003
+      - OLLAMA_API_BASE=http://host.docker.internal:11434
+      - CHROMA_DB_PATH=/app/data/chroma
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+    volumes:
+      - .:/app
+      - ./data/chroma:/app/data/chroma
+    depends_on:
+      a2a_server:
+        condition: service_healthy
+
+  # ChromaDB for vector storage
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8004:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ALLOW_RESET=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+
+volumes:
+  chroma_data:

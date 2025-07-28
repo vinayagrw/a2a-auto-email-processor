@@ -1,0 +1,9 @@
+
+        Dear {sender},
+
+        Thank you for your email regarding {subject}.
+        {custom_response}
+
+        Best regards,
+        Your Contractor Team
+        

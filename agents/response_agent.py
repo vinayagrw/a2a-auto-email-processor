@@ -3,14 +3,13 @@ Response Agent for A2A MCP Contractor Automation.
 
 This module handles generating responses to incoming requests.
 """
-import os
-import sys
-import json
+import sys,os
+import socket
 import logging
-import asyncio
-import uvicorn
-from typing import Dict, Any, Optional, List
+from datetime import datetime
+from typing import Dict, Any, Optional, List, AsyncGenerator
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 from fastapi.middleware.cors import CORSMiddleware
 from a2a.client import A2AClient, A2ACardResolver
@@ -18,32 +17,48 @@ from a2a.types import Task, Artifact
 from fastapi import FastAPI, HTTPException, Body, status, Request, Response
 import httpx
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 
-# Import configuration
-try:
-    from .config import (
-        A2A_SERVER_HOST,
-        A2A_SERVER_PORT,
-        RESPONSE_AGENT_PORT
-    )
-except ImportError:
-    # Fall back to absolute import if running directly
-    from config import (
-        A2A_SERVER_HOST,
-        A2A_SERVER_PORT,
-        RESPONSE_AGENT_PORT
-    )
+# Add the parent directory to the path
+sys.path.append(str(Path(__file__).parent.parent))
 
-# Configure logging
+# Load environment variables
+load_dotenv()
+
+# Import from consolidated config
+from config import (
+    LOG_LEVEL, 
+    A2A_SERVER_HOST, A2A_SERVER_PORT, LOG_FILE,
+    OLLAMA_API_BASE, OLLAMA_MODEL,
+    RESPONSE_AGENT_PORT
+)
+
+
+
+# Set up logging directory
+BASE_DIR = Path(__file__).parent.parent
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(exist_ok=True, parents=True)
+
+# Clear any existing handlers to avoid duplicate logs
+root_logger = logging.getLogger()
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+    handler.close()
+
+# Configure root logger
 logging.basicConfig(
-    level=logging.INFO,
+    level=LOG_LEVEL.upper(),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("response_agent.log")
+        logging.FileHandler(LOG_DIR / "response_agent.log", mode='a'),  # Append to log file
+        logging.StreamHandler(sys.stdout)  # Log to console
     ]
 )
+
+# Get logger for this module
 logger = logging.getLogger(__name__)
+
 
 # Models
 class SuccessResponse(BaseModel):
@@ -61,69 +76,170 @@ class TaskModel(BaseModel):
     artifacts: List[Dict[str, Any]]
     metadata: Optional[dict] = {}
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    # Startup logic
+    try:
+        await agent.initialize()
+        logger.info("Response Agent started successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize ResponseAgent: {str(e)}")
+        raise
+    
+    yield  # This is where the application runs
+    
+    # Shutdown logic
+    if agent.httpx_client:
+        await agent.httpx_client.aclose()
+    logger.info("Response Agent shutdown complete")
+
 # Create FastAPI app
-app = FastAPI(
-    title="Response Agent API",
-    description="API for generating responses to emails",
-    version="1.0.0"
-)
-
-# Setup CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Setup routes
-@app.post(
-    "/process_task",
-    response_model=SuccessResponse,
-    responses={
-        200: {"model": SuccessResponse, "description": "Response generated successfully"},
-        500: {"model": ErrorResponse, "description": "Internal server error"}
-    },
-    summary="Generate a response for a task",
-    description="Processes a task that requires generating a response to the provided content"
-)
-async def process_task_route(task: TaskModel = Body(...)):
-    """Process a task that requires a response"""
-    return await agent.process_task_internal(task)
+def create_app() -> FastAPI:
+    """Create and configure the FastAPI application."""
+    # Create the FastAPI app with lifespan handler
+    app = FastAPI(
+        title="Response Agent API",
+        description="API for the Response Agent that generates responses to incoming requests",
+        version="1.0.0",
+        lifespan=lifespan
+    )
+    
+    # Add CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    
+    @app.get(
+        "/health",
+        response_model=SuccessResponse,
+        summary="Health check endpoint",
+        description="Check if the agent is running"
+    )
+    async def health_check():
+        """Health check endpoint."""
+        return {
+            "success": True,
+            "message": "Response Agent is running",
+            "data": {
+                "status": "healthy",
+                "version": "1.0.0"
+            }
+        }
+    
+    return app
 
 class ResponseAgent:
     """Agent responsible for generating responses to emails based on their content and intent."""
     
-    def __init__(self):
+    def __init__(self, base_url: str = None, model: str = None):
         """Initialize the ResponseAgent with required components."""
         self.httpx_client = None
-        self.resolver = None
-        self.agent_card = None
         self.client = None
-    
+        self.initialized = False
+        self.llm = None
+        self.template_engine = None
+        self.a2a_server_url = os.getenv("A2A_SERVER_URL", "http://a2a_server:8000")
+        self.service_name = "response_agent"
+        self.service_port = int(os.getenv("RESPONSE_AGENT_PORT", "8002"))
+        self.base_url = base_url or OLLAMA_API_BASE
+        self.model = model or OLLAMA_MODEL
+
+    async def initialize(self) -> bool:
+        """
+        Initialize the agent, register with A2A server, and set up dependencies.
+        
+        Returns:
+            bool: True if initialization was successful
+            
+        Raises:
+            Exception: If initialization fails
+        """
+        try:
+            # Initialize HTTP client
+            self.httpx_client = httpx.AsyncClient()
+            
+            # Initialize A2A client with the configured server URL
+            self.client = A2AClient(
+                httpx_client=self.httpx_client,
+                url=self.a2a_server_url
+            )
+            
+            # Register with A2A server using direct HTTP call
+            service_url = f"http://{socket.gethostname()}:{self.service_port}"
+            registration_data = {
+                "name": self.service_name,
+                "url": service_url,
+                "type": "agent",
+                "capabilities": ["response_generation"]  # Only response generation for this agent
+            }
+            
+            # Set up agent card with service information
+            self.agent_card = {
+                "type": "agent",
+                "name": "Response Agent",
+                "description": "Generates responses to incoming requests",
+                "version": "1.0.0",
+                "url": service_url,
+                "capabilities": ["response_generation"],
+                "status": "ready"
+            }
+            
+            # Make HTTP request to register the service
+            try:
+                response = await self.httpx_client.post(
+                    f"{self.a2a_server_url}/services",
+                    json=registration_data
+                )
+                response.raise_for_status()
+                logger.info(f"Successfully registered with A2A server at {self.a2a_server_url}")
+                
+                self.initialized = True
+                logger.info(f"Response Agent initialized successfully")
+                return True
+                
+            except Exception as e:
+                error_msg = f"Failed to register with A2A server: {str(e)}"
+                logger.error(error_msg)
+                raise RuntimeError(error_msg) from e
+            
+        except Exception as e:
+            error_msg = f"Failed to initialize ResponseAgent: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            if self.httpx_client:
+                await self.httpx_client.aclose()
+            self.initialized = False
+            raise Exception(error_msg) from e
+
     async def process_task_internal(self, task: TaskModel) -> dict:
         """
-        Process a task that requires a response.
+        Process a task that requires a response or summary.
         
         Args:
             task: The task containing artifacts to be processed
             
         Returns:
-            dict: A generated response for the provided content
+            dict: A generated response or summary for the provided content
             
         Raises:
             HTTPException: If there's an error processing the task
         """
         try:
-            logger.info(f"Processing task: {task.description}")
+            logger.info(f"Processing task: {task.id}")
+            
+
             result = await self._process_task(task)
             return {
                 "status": "success",
                 "message": "Response generated successfully",
-                "data": result
+                "data": result,
+                "is_summary": False
             }
-            
+        
         except HTTPException:
             raise
             
@@ -143,38 +259,62 @@ class ResponseAgent:
             task: The task to process
             
         Returns:
-            dict: The generated response
+            dict: The generated response with metadata
         """
         try:
-            # Extract email content from artifacts
+            # Extract email content and metadata from artifacts
             email_content = ""
+            sender = "Unknown"
+            subject = "No Subject"
             intent = "general"
             
             for artifact in task.artifacts:
-                if artifact.type == "email":
-                    try:
-                        email_data = json.loads(artifact.content)
-                        email_content = f"From: {email_data.get('sender', 'Unknown')}\n"
-                        email_content += f"Subject: {email_data.get('subject', 'No Subject')}\n\n"
-                        email_content += email_data.get('body', '')
-                        
-                        # Get intent from metadata if available
-                        intent = artifact.metadata.get('intent', 'general')
+                if isinstance(artifact, dict):  # Handle dict artifacts
+                    if artifact.get("type") == "text/plain":
+                        email_content = artifact.get("content", "")
+                        sender = artifact.get("metadata", {}).get("sender", "Unknown")
+                        subject = artifact.get("metadata", {}).get("subject", "No Subject")
+                        intent = artifact.get("metadata", {}).get("intent", "general")
                         break
-                    except json.JSONDecodeError as e:
-                        logger.warning(f"Failed to parse email artifact: {str(e)}")
+                elif hasattr(artifact, 'type') and artifact.type == "text/plain":  # Handle Pydantic models
+                    email_content = getattr(artifact, 'content', '')
+                    metadata = getattr(artifact, 'metadata', {})
+                    sender = metadata.get("sender", "Unknown")
+                    subject = metadata.get("subject", "No Subject")
+                    intent = metadata.get("intent", "general")
+                    break
             
             if not email_content:
                 raise ValueError("No valid email content found in task artifacts")
             
-            # Generate response based on content and intent
-            response = await self.generate_response(email_content, intent)
+            # Format email content for display
+            formatted_content = f"From: {sender}\n"
+            formatted_content += f"Subject: {subject}\n\n"
+            formatted_content += email_content
             
-            return {
+            # Generate response based on intent
+            response = await self.generate_response(formatted_content, intent)
+            
+            # Prepare response with metadata
+            result = {
                 "response": response,
                 "intent": intent,
-                "status": "completed"
+                "status": "completed",
+                "metadata": {
+                    "sender": sender,
+                    "subject": subject,
+                    "processed_at": datetime.now().isoformat(),
+                    **task.metadata
+                } if hasattr(task, 'metadata') else {
+                    "sender": sender,
+                    "subject": subject,
+                    "processed_at": datetime.now().isoformat()
+                }
             }
+            
+            logger.info(f"Generated response for intent: {intent}")
+            logger.info(f"Generated response: {result}")
+            return result
             
         except Exception as e:
             logger.error(f"Error in _process_task: {str(e)}", exc_info=True)
@@ -182,7 +322,7 @@ class ResponseAgent:
 
     async def generate_response(self, email_content: str, intent: str) -> str:
         """
-        Generate a response for the given email content and intent.
+        Generate a response for the given email content and intent using templates and LLM.
         
         Args:
             email_content: The content of the email to respond to
@@ -191,115 +331,80 @@ class ResponseAgent:
         Returns:
             str: The generated response
             
-        Note:
-            This is a simplified implementation. In a real application, you would typically use
-            a language model or template-based system to generate more sophisticated responses.
+        Raises:
+            Exception: If response generation fails
         """
         try:
-            # Simple template-based response generation
-            response_templates = {
-                "greeting": "Thank you for your email. How can I assist you today?",
-                "question": "Thank you for your inquiry. Here's the information you requested:",
-                "complaint": "We're sorry to hear about your experience. Let us help resolve this issue for you.",
+            logger.info(f"Generating response for intent: {intent}")
+            
+            # Load quote template
+            template_path = OUTPUT_DIR / "templates" / f"{intent}_template.txt"
+            template_path.parent.mkdir(exist_ok=True, parents=True)
+            
+            if not template_path.exists():
+                logger.warning(f"No template found for intent: {intent}, using default template")
+                # Create default template if it doesn't exist
+                default_template = """
+    Dear {sender},
+
+    Thank you for your email regarding {subject}.
+    {custom_response}
+
+    Best regards,
+    Your Contractor Team
+    """
+                with open(template_path, "w") as f:
+                    f.write(default_template)
+
+            # Read template
+            with open(template_path, "r") as f:
+                template = f.read()
+
+            # Generate response using local LLM
+            prompt = f"""
+            Customize the following template based on the email content and intent.
+            
+            Intent: {intent}
+            Template: {template}
+            Email Content: {email_content}
+            
+            Please generate a professional and helpful response.
+            """
+
+            logger.debug(f"Sending prompt to LLM for intent: {intent}")
+            logger.info(f"Generating response with LLM for prompt: {prompt}")
+            # Use httpx.AsyncClient for async HTTP requests
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/generate", # Ollama API endpoint
+                    json={
+                        "model": self.model,
+                        "prompt": prompt.strip(),
+                        "stream": False
+                    },
+                    timeout=500
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    return result.get("response", "Thank you for your email. We've received your message and will get back to you soon.")
+                else:
+                    error_msg = f"LLM API error: {response.text}"
+                    logger.error(error_msg)
+                    raise Exception(error_msg)
+                    
+        except Exception as e:
+            error_msg = f"Error generating response: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            
+            # Fallback response if LLM fails
+            fallback_responses = {
+                "quote_request": "Thank you for your quote request. We'll get back to you with a detailed proposal soon.",
+                "common_question": "Thank you for your inquiry. We'll provide you with the information you need shortly.",
                 "general": "Thank you for your email. We've received your message and will get back to you soon."
             }
-            
-            # Select template based on intent
-            if intent in response_templates:
-                return response_templates[intent]
-                
-            # Default response
-            return response_templates["general"]
-            
-        except Exception as e:
-            logger.error(f"Error in generate_response: {str(e)}", exc_info=True)
-            return "Thank you for your email. We've received your message and will get back to you soon."
-
-    async def generate_response(self, email_content: str, intent: str) -> str:
-        # Load quote template
-        template_path = OUTPUT_DIR / "templates" / "quote_template.txt"
-        template_path.parent.mkdir(exist_ok=True, parents=True)
-        
-        if not template_path.exists():
-            # Create default template if it doesn't exist
-            default_template = """
-Dear {sender},
-
-Thank you for your interest in our services. Based on your request regarding {subject},
-we would be happy to provide you with a detailed quote.
-
-[Customized response based on email content]
-
-Best regards,
-Your Contractor Team
-"""
-            with open(template_path, "w") as f:
-                f.write(default_template)
-
-        # Read template
-        with open(template_path, "r") as f:
-            template = f.read()
-
-        # Generate response using local LLM
-        prompt = f"""
-        Customize the following template based on the email content:
-        
-        Template: {template}
-        
-        Email Content: {email_content}
-        """
-
-        response = requests.post(
-            LLM_URL,
-            json={
-                "prompt": prompt,
-                "stream": False
-            }
-        )
-
-        if response.status_code == 200:
-            return response.json()["response"]
-        raise Exception("Failed to generate response")
-
-    async def initialize(self) -> bool:
-        """
-        Initialize the agent and its dependencies.
-        
-        Returns:
-            bool: True if initialization was successful
-            
-        Raises:
-            Exception: If initialization fails
-        """
-        try:
-            # Initialize HTTP client
-            self.httpx_client = httpx.AsyncClient()
-            
-            # Initialize A2A client
-            self.client = A2AClient(
-                server_url=f"http://{A2A_SERVER_HOST}:{A2A_SERVER_PORT}",
-                client=self.httpx_client
-            )
-            
-            # Initialize card resolver
-            self.resolver = A2ACardResolver()
-            
-            # Register the agent card
-            self.agent_card = {
-                "type": "agent",
-                "name": "response_agent",
-                "description": "Generates responses to incoming emails based on their content and intent.",
-                "version": "1.0.0"
-            }
-            
-            self.initialized = True
-            logger.info("ResponseAgent initialized successfully")
-            return True
-            
-        except Exception as e:
-            error_msg = f"Failed to initialize ResponseAgent: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            raise Exception(error_msg)
+            return fallback_responses.get(intent, fallback_responses["general"])
+    
 
 def create_app():
     """Create and configure the FastAPI application."""
@@ -323,7 +428,7 @@ def create_app():
     
     # Add routes
     @app.post(
-        "/process_task",
+        "/process",
         response_model=SuccessResponse,
         responses={
             200: {"model": SuccessResponse, "description": "Task processed successfully"},
@@ -370,6 +475,22 @@ def create_app():
 
 def main():
     """Run the FastAPI application with uvicorn."""
+    import argparse
+    
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Run the Response Agent')
+    parser.add_argument('--log_level', type=str, default=LOG_LEVEL,
+                      choices=['debug', 'info', 'warning', 'error'],
+                      help='Set the logging level')
+    args = parser.parse_args()
+    
+    # Convert log level string to logging level
+    log_level = getattr(logging, args.log_level.upper())
+    
+    
+    # Set uvicorn log level to match
+    uvicorn_log_level = args.log_level if args.log_level != 'debug' else LOG_LEVEL
+    
     import uvicorn
     
     # Create the FastAPI app
@@ -380,8 +501,9 @@ def main():
         app,
         host="0.0.0.0",
         port=RESPONSE_AGENT_PORT,
-        log_level="info"
+        log_level=uvicorn_log_level
     )
+
 
 if __name__ == "__main__":
     main()

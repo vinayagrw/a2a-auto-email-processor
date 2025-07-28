@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  email_processor:
+    environment:
+      - LLM_URL=http://host.docker.internal:11434/api/generate
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  response_agent:
+    environment:
+      - LLM_URL=http://host.docker.internal:11434/api/generate
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  summary_agent:
+    environment:
+      - LLM_URL=http://host.docker.internal:11434/api/generate
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
