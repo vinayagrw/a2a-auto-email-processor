@@ -203,6 +203,8 @@ class EmailProcessorAgent:
                 )
                 logger.info(f"Send request created: {request}")
                 stream_response = client.send_message_streaming(request)
+                response_agent_result = None
+                summary_agent_result = None
                 async for chunk in stream_response:
                     logger.info("response: " + chunk.model_dump_json(exclude_none=True, indent=2))
                     res = chunk.model_dump_json(exclude_none=True, indent=2)
@@ -214,6 +216,12 @@ class EmailProcessorAgent:
                             response_agent_result=str(res['result']['artifact']['parts'][0]['text']).removeprefix(prefix_to_remove).split('done')[0][:-4].split('response')[1][4:]
                             
                             logger.info(f"email response result: {response_agent_result}")
+                            break
+                        if "Summary generated with LLM for prompt" in res['result']['artifact']['parts'][0]['text']:
+                            prefix_to_remove = "Summary generated with LLM for prompt: "
+                            summary_agent_result=str(res['result']['artifact']['parts'][0]['text']).removeprefix(prefix_to_remove).split('done')[0][:-4].split('response')[1][5:]
+                            
+                            logger.info(f"email summary result: {summary_agent_result}")
                             break
   
                     except Exception as e:
@@ -235,7 +243,7 @@ class EmailProcessorAgent:
                 'classification': classification,
                 'processed_at': datetime.now(timezone.utc), 
                 'agent': service_url,
-                'response': response_agent_result,  
+                'response': response_agent_result if response_agent_result else summary_agent_result,  
                 'actions': [{
                     'type': 'respond',
                     'priority': classification['priority'],
@@ -246,7 +254,7 @@ class EmailProcessorAgent:
             yield {
                 'is_task_complete': True,
                 'task_state': 'completed',
-                'final_message_text': response_agent_result,
+                'final_message_text': response_agent_result if response_agent_result else summary_agent_result,
                 'agent': service_url,
                 'result': result,
                 'progress_percent': 100

@@ -1,3 +1,10 @@
+"""
+Summary Agent Executor.
+
+This module contains the executor for the Summary Agent, which handles the
+actual execution of summary generation tasks.
+"""
+
 import logging
 from typing import Any, Dict, Optional, override, AsyncGenerator
 
@@ -15,54 +22,50 @@ from a2a.types import (
 )
 from a2a.utils import new_agent_text_message, new_task, new_text_artifact
 
-from agent import EmailProcessorAgent
+from agent import SummaryAgent
 
 logger = logging.getLogger(__name__)
 
-class EmailProcessorAgentExecutor(AgentExecutor):
-    """Email Processor AgentExecutor that handles email processing tasks with streaming."""
 
-    def __init__(self):
-        self.agent = EmailProcessorAgent()
+logger = logging.getLogger(__name__)
 
+class SummaryAgentExecutor(AgentExecutor):
+    """Executor for the Summary Agent."""
+        
+    def __init__(self, **kwargs):
+        """Initialize the SummaryAgentExecutor."""
+        super().__init__(**kwargs)
+        self.agent = SummaryAgent()
+    
     @override
     async def execute(
         self,
         context: RequestContext,
-        event_queue: EventQueue,
+        event_queue: EventQueue
     ) -> None:
-        """Execute the email processing task with streaming.
+        """
+        Execute the summary generation task.
         
         Args:
-            context: The request context containing the email data
-            event_queue: The event queue for sending updates
+            context: The execution context containing the task data
+            event_queue: Queue for sending progress updates
         """
-        
         query = context.get_user_input()
         task = context.current_task
-        logger.info(f"\nExecuting email processing task: {query}")
+        logger.info(f"\nExecuting summary generation task: {query}")
 
         if not task:
             task = new_task(context.message)
             await event_queue.enqueue_event(task)
-
+        
         try:
-            # Invoke the underlying agent with streaming results
-            async for event in self.agent.process_email_stream(query, task.context_id):
+
+
+            async for event in self.agent.generate_summary(query, task.context_id):
                 task_state = TaskState(event.get('task_state', TaskState.working))
                 
                 if event.get('is_task_complete', False):
                     # Handle task completion
-                    retrieved_full_llm_response_object = event.get('result')
-                    classification = event.get('result', {}).get('classification', {})
-                    print("\n" + "="*80)
-                    final_llm_generated_text = event.get('final_message_text', '')
-                    logger.info(f"Task completed for task ID: {task.id}")
-                    logger.info(f"Final LLM generated text: {final_llm_generated_text}")
-                    logger.info(f"Email Classification: {classification}")
-                    print("\n" + "="*80)
-                    # logger.info(f"Full LLM response object: {retrieved_full_llm_response_object}")
-                    
                     await event_queue.enqueue_event(
                         TaskArtifactUpdateEvent(
                             append=False,
@@ -70,9 +73,9 @@ class EmailProcessorAgentExecutor(AgentExecutor):
                             task_id=task.id,
                             last_chunk=True,
                             artifact=new_text_artifact(
-                                name='email_processing_result',
-                                description='Result of email processing',
-                                text=final_llm_generated_text,
+                                name='email_summary_result',
+                                description='Result of email summary',
+                                text=event.get('content', ''),
                             ),
                         )
                     )
@@ -107,7 +110,7 @@ class EmailProcessorAgentExecutor(AgentExecutor):
                     )
                     
         except Exception as e:
-            logger.error(f"Error in email processing: {e}", exc_info=True)
+            logger.error(f"Error in summary generation: {e}", exc_info=True)
             await self._handle_execution_error(
                 TaskUpdater(event_queue, task.id, task.context_id) if task else None,
                 task,
@@ -153,7 +156,7 @@ class EmailProcessorAgentExecutor(AgentExecutor):
     ) -> None:
         """Handle successful task completion."""
         if update.get('is_error', False):
-            await self._handle_task_error(updater, task, update)
+            await self._handle_task_error(updater, task, update)    
             return
             
         result = update.get('result', {})
@@ -187,12 +190,11 @@ class EmailProcessorAgentExecutor(AgentExecutor):
         self, updater: TaskUpdater, task: Task, error: Exception
     ) -> None:
         """Handle execution errors."""
-        logger.error(f'Error in email processing task {task.id}: {error}', exc_info=True)
+        logger.error(f'Error in response generation task {task.id}: {error}', exc_info=True)
         
         if updater:
             await updater.failed(new_agent_text_message(
-                f'Failed to process email: {error}',
+                f'Failed to generate response: {error}',
                 task.context_id if task else None,
                 task.id if task else None
             ))
-

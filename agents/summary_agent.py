@@ -288,7 +288,7 @@ class SummaryAgent:
             prompt = f"""
             Please provide a concise summary of the following email content.
             Focus on key points, action items, and important details.
-            Keep the summary under 100 words.
+            Keep the summary under 100 words. if you have any questions or need clarification then do include in response
             
             Email Content:
             {content}
