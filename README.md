@@ -1,514 +1,450 @@
-# A2A Contractor Email Automation
+# A2A Contractor Automation - Agent Architecture
 
-*Last Updated: July 25, 2025*
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.13+](https://img.shields.io/badge/Python-3.13+-blue.svg)](https://www.python.org/downloads/)
+[![Docker](https://img.shields.io/badge/Docker-Supported-2496ED?logo=docker)](https://www.docker.com/)
 
-A lightweight demo application showcasing Agent-to-Agent (A2A) communication using A2A SDK for automating email management in a small business contractor setting. This system processes incoming emails, generates appropriate responses, and maintains a searchable database of email interactions using ChromaDB.
+![Concept](.gitbook/concept.png)
 
-## Quick Start with Docker
+## Overview
+
+This document provides a comprehensive guide to the Agent-to-Agent (A2A) architecture used in the Contractor Automation system. The system is built using Google's A2A framework, which enables seamless communication between specialized agents to automate email processing, response generation, and summarization for contractor management.
+
+## Architecture Overview
+
+The system follows a microservices architecture where each agent is an independent service with specific responsibilities. Agents communicate using the A2A protocol over HTTP, enabling loose coupling and scalability.
+
+![Architecture](.gitbook/architecture.png)
+
+
+
+```
+                                                     ┌──────────────────┐  
+                                                     │   Response Agent │
+                                                     └──────────────────┘
+ ┌─────────────────┐        ┌─────────────────┐        
+ │   Gmail API     │─────▶ │  Email Processor│────▶
+ └─────────────────┘        └─────────────────┘     
+                                                    ┌─────────────────┐
+                                                    │   Summary Agent │
+                                                    └─────────────────┘
+```
+
+## Agent Communication Flow
+
+1. **Email Processor**
+   - Listens for new emails via Gmail API
+   - Processes and classifies incoming emails
+   - Forwards emails to the appropriate agent based on classification
+   - Maintains the state of email processing tasks
+
+2. **Response Agent**
+   - Generates contextually appropriate responses to emails
+   - Handles direct queries and common questions
+   - Implements response templates and dynamic content generation
+
+3. **Summary Agent**
+   - Processes and summarizes email threads
+   - Maintains conversation history
+   - Provides executive summaries of ongoing communications
+
+## A2A Framework Implementation
+
+The system leverages Google's A2A (Agent-to-Agent) framework, which provides:
+
+### Core A2A Features
+
+1. **Service Discovery**: Automatic discovery of available agents through Agent Cards
+2. **Standardized Communication**: Unified API for inter-agent communication
+3. **Task Management**: Built-in support for long-running tasks with progress tracking
+4. **Error Handling**: Consistent error reporting and recovery mechanisms
+5. **Streaming Support**: Real-time, incremental updates for tasks and artifacts
+
+### A2A Streaming Protocol
+
+The A2A framework supports real-time, incremental updates through Server-Sent Events (SSE), enabling efficient streaming of task status changes and artifacts. This is particularly useful for long-running tasks where immediate feedback is valuable.
+
+#### Key Streaming Features
+
+- **Real-time Updates**: Receive immediate notifications about task status changes
+- **Efficient Data Transfer**: Only send incremental updates
+- **Bi-directional Communication**: While primarily server-to-client, the protocol supports ongoing interaction
+- **Support for Large Payloads**: Stream large artifacts in chunks
+
+
+
+#### Response Format (SSE Stream)
+
+The server responds with a stream of Server-Sent Events (SSE), where each event contains a JSON-RPC 2.0 response object.
+
+##### Task Status Update Event
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "request-id",
+  "result": {
+    "taskId": "task-123",
+    "contextId": "context-456",
+    "kind": "status-update",
+    "status": "in-progress",
+    "final": false,
+    "metadata": {
+      "progress": 50,
+      "message": "Processing your request..."
+    }
+  }
+}
+```
+
+##### Artifact Update Event
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "request-id",
+  "result": {
+    "taskId": "task-123",
+    "contextId": "context-456",
+    "kind": "artifact-update",
+    "artifact": {
+      "id": "artifact-789",
+      "type": "text/plain",
+      "content": "This is a chunk of the artifact..."
+    },
+    "append": true,
+    "lastChunk": false
+  }
+}
+```
+
+### Error Handling
+
+- **Connection Errors**: Automatically retry with exponential backoff
+- **Invalid Messages**: Log and skip malformed events
+- **Rate Limiting**: Respect Retry-After headers
+- **Timeouts**: Implement appropriate timeouts for both connection and response streaming
+
+- **Service Discovery**: Automatic discovery of available agents
+- **Standardized Communication**: Unified API for inter-agent communication
+- **Task Management**: Built-in support for long-running tasks with progress tracking
+- **Error Handling**: Consistent error reporting and recovery mechanisms
+
+### Key A2A Components
+
+1. **AgentCard**
+   - Defines the agent's capabilities and metadata
+   - Includes supported input/output formats
+   - Specifies the agent's API endpoints
+
+2. **AgentExecutor**
+   - Implements the core business logic of each agent
+   - Handles incoming requests and delegates to appropriate handlers
+   - Manages task state and progress updates
+
+3. **Request Handler**
+   - Processes incoming HTTP requests
+   - Validates input data
+   - Routes requests to the appropriate executor methods
+
+## Agent Implementation Details
+
+### Email Processor Agent
+
+**Purpose**: Processes incoming emails and routes them to the appropriate handler.
+
+**Key Features**:
+- Email parsing and validation
+- Content classification
+- Task initiation and management
+- Error handling and retry logic
+
+**Dependencies**:
+- A2A Server
+- Gmail API credentials
+
+### Response Agent
+
+**Purpose**: Generates appropriate responses to incoming emails.
+
+**Key Features**:
+- Response template management
+- Dynamic content generation
+- Context-aware response selection
+- Multi-language support
+
+**Dependencies**:
+- A2A Server
+- LLM integration (Ollama/LM Studio)
+
+### Summary Agent
+
+**Purpose**: Generates summaries of email threads and conversations.
+
+**Key Features**:
+- Thread analysis
+- Key point extraction
+- Summary generation
+- Context preservation
+
+**Dependencies**:
+- A2A Server
+- Vector database (ChromaDB)
+- LLM integration
+
+## Communication Protocol
+
+Agents communicate using a standardized JSON-based protocol over HTTP. Each message includes:
+
+```json
+{
+  "task_id": "unique-task-identifier",
+  "action": "action-name",
+  "parameters": {
+    "key": "value"
+  },
+  "metadata": {
+    "source": "source-agent",
+    "timestamp": "ISO-8601-timestamp"
+  }
+}
+```
+
+## Error Handling
+
+The system implements a comprehensive error handling strategy:
+
+1. **Input Validation**: All inputs are validated against schemas
+2. **Retry Logic**: Transient failures are automatically retried
+3. **Circuit Breaker**: Prevents cascading failures
+4. **Dead Letter Queue**: Failed messages are stored for later analysis
+
+## Monitoring and Logging
+
+- Structured logging with correlation IDs
+- Performance metrics collection
+- Health check endpoints
+- Distributed tracing
+
+## Security Considerations
+
+- All inter-service communication is encrypted (HTTPS)
+- API key authentication between services
+- Role-based access control
+- Input sanitization and validation
+
+## 🚀 Quick Start with Docker
+
+The easiest way to get started is using Docker Compose, which will set up all the necessary services with a single command.
 
 ### Prerequisites
-1. Python 3.13
-2. Poetry (for dependency management)
-3. Local LLM (Ollama or LM Studio)
-4. Gmail API credentials
+
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
+- [Ollama](https://ollama.ai/) or another LLM service running locally
 
 ### 1. Clone the Repository
+
 ```bash
 git clone https://github.com/yourusername/a2a-mcp-contractor-automation.git
-cd a2a-mcp-contractor-automation
+cd a2a-mcp-contractor-automation/a2a_agents
 ```
 
 ### 2. Set Up Environment
-```bash
-# Create necessary directories
-mkdir -p data output logs
 
-# Make sure Docker Desktop is running
+Copy the example environment file and update it with your configuration:
+
+```bash
+cp .env.example .env
+# Edit the .env file with your settings
 ```
 
 ### 3. Start the Services
-```bash
-# Start all services in detached mode
-docker-compose up --build -d
 
-# View logs
-docker-compose logs -f
+```bash
+docker-compose up --build -d
 ```
 
 ### 4. Access the Services
+
+Once all services are up and running, you can access them at:
+
 - **A2A Server**: http://localhost:8000
 - **Email Processor**: http://localhost:8001
 - **Response Agent**: http://localhost:8002
 - **Summary Agent**: http://localhost:8003
-- **ChromaDB Viewer**: http://localhost:5000
+- **ChromaDB UI**: http://localhost:8004
 
-### 5. Run the Gmail Integration
+### 5. View Logs
+
+To monitor the services:
+
 ```bash
-# Make sure to run this from your host machine
-python gmail_agent_integration.py
+# View all logs
+docker-compose logs -f
+
+# View logs for a specific service
+docker-compose logs -f email_processor
+docker-compose logs -f response_agent
+docker-compose logs -f summary_agent
 ```
 
-### 6. Stop the Services
-```bash
-docker-compose down
-```
+## 🛠 Manual Setup (Development)
 
-## Features
+If you prefer to run the services manually outside of Docker:
 
-- **Gmail Integration**: Directly fetch and process emails from Gmail
-- **Automated Classification**: Categorize incoming emails using local LLM
-- **Intelligent Responses**: Generate context-aware responses for quote requests
-- **Daily Summaries**: Automatic generation of daily email interaction summaries
-- **Searchable Database**: Store and query email interactions with ChromaDB
-- **Web Interface**: Built-in ChromaDB viewer for easy data exploration
-- **Modular Architecture**: Clean A2A architecture with specialized agents
-- **Local AI**: Runs entirely on your machine with Ollama or LM Studio
+### Prerequisites
 
-## Architecture
-
-```mermaid
-graph TD
-    A[Gmail] -->|Fetch Emails| B[EmailProcessorAgent]
-    A2A[A2A Server] <--> B
-    B -->|Classify| C{Intent?}
-    C -->|Quote Request| D[ResponseAgent]
-    C -->|Summary Needed| E[SummaryAgent]
-    A2A <--> D
-    A2A <--> E
-    D -->|Response| A2A
-    E -->|Summary| A2A
-    B -->|Store| F[(ChromaDB)]
-    G[ChromaDB Viewer] <-->|View Data| F
-```
-
-The system consists of multiple specialized agents working together:
-
-1. **EmailProcessorAgent** (Port: 8001)
-   - Monitors and processes incoming emails
-   - Classifies email intent using local LLM
-   - Delegates tasks to appropriate agents
-   - Stores all responses and summaries in ChromaDB
-   - Handles Gmail API integration
-
-2. **ResponseAgent** (Port: 8002)
-   - Generates customized responses for quote requests
-   - Uses local templates and LLM for response customization
-   - Maintains response consistency and tone
-   - Lightweight, stateless service
-
-3. **SummaryAgent** (Port: 8003)
-   - Creates concise summaries of email interactions
-   - Uses local LLM for summarization
-   - Returns summaries to EmailProcessor for storage
-   - Focused solely on summarization logic
-
-4. **ChromaDB** (Persistent Storage)
-   - Centralized storage for all emails, responses, and summaries
-   - Persistent storage in `./data/chroma`
-   - Web interface available at `http://localhost:5000`
-   - Search and filter functionality
-
-## Prerequisites
-
-
-
-
-
-## Recent Updates
-
-### Architecture Refactor (2025-07-25)
-- Centralized ChromaDB storage in EmailProcessor
-- Removed ChromaDB dependency from SummaryAgent
-- Simplified agent communication flow
-- Added ChromaDB viewer for data inspection
-
-### Docker Support (2025-07-24)
-- Added Docker Compose for easy deployment
-- Containerized all agents
-- Simplified setup process
-- Improved networking between services
-
-### Gmail Integration (2025-07-24)
-- Added direct Gmail API integration for email fetching
-- Automatic processing of incoming emails
-- Support for attachments and rich text emails
-
-### ChromaDB Migration (2024-07-23)
-- Updated to use the new `PersistentClient` API
-- Removed deprecated `Settings` configuration
-- Added web-based ChromaDB viewer
-- Improved data persistence and recovery
-
-### New Features
-- Added `gmail_agent_integration.py` for Gmail processing
-- Enhanced logging and error handling
-- Improved email parsing and metadata extraction
-- Added support for multiple email formats
-
-To upgrade an existing installation:
-```bash
-pip install --upgrade chromadb google-auth-oauthlib google-api-python-client httpx
-# If you have existing data, migrate it using:
-# pip install chroma-migrate
-# chroma-migrate
-```
-
-## Local Development Setup
+- Python 3.13+
+- [Poetry](https://python-poetry.org/) for dependency management
+- Ollama or another LLM service
+- ChromaDB or another vector database
 
 ### 1. Install Dependencies
-```bash
-# Install Poetry if you haven't already
-pip install poetry
 
-# Install project dependencies
+```bash
+# Install Python dependencies
 poetry install
 
 # Activate the virtual environment
 poetry shell
 ```
 
-## A2A Communication Components
+### 2. Configure Environment
 
-The system uses Agent-to-Agent (A2A) communication for service discovery and inter-process communication. Here's how it works:
+Create and configure your `.env` file as shown in the Docker section.
 
-### Key Components
+### 3. Start the Services
 
-1. **A2A Server**
-   - Central registry for service discovery
-   - Manages agent registration and health checks
-   - Runs on port 8000 by default
-   - Provides REST API for service registration and discovery
-   - Maintains a list of available services and their capabilities
+In separate terminal windows:
 
-2. **Agents**
-   - **Email Processor Agent**: Routes tasks to appropriate agents
-     - Capabilities: `email_processing`, `task_delegation`
-     - Default Port: 8001
-   - **Response Agent**: Generates responses to emails
-     - Capabilities: `response_generation`
-     - Default Port: 8002
-   - **Summary Agent**: Creates summaries of email threads
-     - Capabilities: `summarization`
-     - Default Port: 8003
-
-3. **Service Registration**
-   Each agent registers itself with the A2A server on startup using HTTP POST:
-   ```python
-   # Example registration data
-   registration_data = {
-       "name": "agent_name",
-       "url": f"http://{hostname}:{port}",
-       "type": "agent",
-       "capabilities": ["capability1", "capability2"]
-   }
-   
-   # Register with A2A server
-   response = await self.httpx_client.post(
-       f"{self.a2a_server_url}/services",
-       json=registration_data
-   )
-   response.raise_for_status()
-   ```
-
-4. **Service Discovery**
-   Agents can discover other services by querying the A2A server:
-   ```python
-   # Get service information
-   response = await self.httpx_client.get(
-       f"{self.a2a_server_url}/services/service_name"
-   )
-   service_info = response.json()
-   
-   # Use the discovered service
-   if service_info.get('url'):
-       response = await self.httpx_client.post(
-           f"{service_info['url']}/endpoint",
-           json=payload
-       )
-   ```
-
-5. **Agent Cards**
-   Each agent maintains an agent card with metadata:
-   ```python
-   self.agent_card = {
-       "type": "agent",
-       "name": "Agent Name",
-       "description": "Agent description",
-       "version": "1.0.0",
-       "url": service_url,
-       "capabilities": ["capability1", "capability2"],
-       "status": "ready"
-   }
-   ```
-
-6. **Error Handling**
-   - Failed registrations are logged but don't prevent agent startup
-   - Service discovery failures are retried with exponential backoff
-   - All inter-agent communication includes timeout handling
-
-7. **Health Checks**
-   - Each agent exposes a `/health` endpoint
-   - The A2A server periodically verifies agent health
-   - Unhealthy services are automatically unregistered
-
-### 2. Set Up Environment Variables
-Create a `.env` file in the project root:
-```env
-# A2A Server Settings
-A2A_SERVER_URL=http://a2a_server:8000  # In Docker
-# A2A_SERVER_URL=http://localhost:8000  # For local development
-A2A_SERVER_PORT=8000
-
-# Agent Settings
-EMAIL_PROCESSOR_AGENT_PORT=8001
-RESPONSE_AGENT_PORT=8002
-SUMMARY_AGENT_PORT=8003
-
-# Agent URLs (for inter-service communication)
-A2A_SERVER_URL=http://a2a_server:8000
-RESPONSE_AGENT_URL=http://response_agent:8002
-SUMMARY_AGENT_URL=http://summary_agent:8003
-
-# LLM Settings (Ollama)
-LLM_URL=http://host.docker.internal:11434/api
-
-# Database Settings
-CHROMA_PERSIST_DIR=/app/data/chroma
-
-# Gmail API Settings (Optional)
-GMAIL_CREDENTIALS_PATH=./credentials/gmail_credentials.json
-GMAIL_TOKEN_PATH=./token.json
-```
-
-### 3. Start Individual Agents
 ```bash
-# Email Processor
-python -m uvicorn agents.email_processor_agent:app --host 0.0.0.0 --port 8001
+# Start A2A Server
+python -m a2a.server.main
 
-# Response Agent (in a new terminal)
-python -m uvicorn agents.response_agent:app --host 0.0.0.0 --port 8002
+# Start Email Processor
+python -m a2a_agents.email_processor.__main__
 
-# Summary Agent (in a new terminal)
-python -m uvicorn agents.summary_agent:app --host 0.0.0.0 --port 8003
+# Start Response Agent
+python -m a2a_agents.response_agent.__main__
+
+# Start Summary Agent
+python -m a2a_agents.summary_agent.__main__
 ```
 
-### 4. Run Gmail Integration
-```bash
-python gmail_agent_integration.py
+## 🧪 Development
+
+### Project Structure
+
+```
+a2a_agents/
+├── a2a_agents/
+│   ├── email_processor/  # Email processing agent
+│   ├── response_agent/   # Response generation agent
+│   └── summary_agent/    # Summary generation agent
+├── tests/               # Test files
+├── .env.example         # Example environment variables
+├── docker-compose.yml   # Docker Compose configuration
+├── Dockerfile           # Docker configuration
+└── pyproject.toml       # Project dependencies
 ```
 
-### Expected Output
-- The system will:
-  1. Authenticate with Gmail (first time will open browser)
-  2. Fetch and process the latest emails
-  3. Generate responses and summaries
-  4. Store everything in ChromaDB
-
-### Verifying the Results
-1. Access the ChromaDB viewer at `http://localhost:8000`
-2. Check individual agent logs in the `logs/` directory
-3. View daily summaries in `logs/summaries/`
-
-## Setup Instructions
+### Setting Up the Development Environment
 
 1. **Install Dependencies**
    ```bash
-   # Install Python requirements
-   pip install -r requirements.txt
-   
-   # Install development dependencies
-   pip install pytest pytest-asyncio httpx
+   poetry install
    ```
 
-2. **Set up Ollama**
+2. **Set Up Pre-commit Hooks**
    ```bash
-   # Install Ollama (Linux/Mac)
-   curl -fsSL https://ollama.com/install.sh | sh
-   
-   # Or on Windows, download from https://ollama.ai/download
-   
-   # Start Ollama service
-   ollama serve
-   
-   # Pull a model (recommended: mistral or llama3)
-   ollama pull mistral
+   pre-commit install
    ```
 
-3. **Set up Gmail API**
+3. **Configure Environment**
    ```bash
-   # Enable Gmail API
-   1. Go to Google Cloud Console: https://console.cloud.google.com/
-   2. Create a new project
-   3. Enable Gmail API
-   4. Configure OAuth consent screen
-   5. Create OAuth 2.0 credentials
-   6. Download credentials.json to project root
+   cp .env.example .env
+   # Edit .env with your configuration
    ```
 
-4. **Environment Configuration**
-   Create a `.env` file in the project root:
-   ```env
-   # Required
-   GMAIL_API_CREDENTIALS=./credentials.json
-   LLM_URL=http://localhost:11434/api/generate
-   
-   # Optional
-   LOG_LEVEL=INFO
-   CHROMA_PERSIST_DIR=./chroma_data
-   ```
+### Running Tests
 
-5. **Running the System**
-
-   **Option 1: Using the provided script (recommended)**
-   ```bash
-   # Start all agents
-   ./run_agents.sh
-   
-   # In a separate terminal, start the ChromaDB viewer
-   python run_chroma_viewer.py
-   ```
-
-   **Option 2: Run agents individually**
-   ```bash
-   # Terminal 1: Email Processor
-   python agents/email_processor_agent.py
-   
-   # Terminal 2: Response Agent
-   python agents/response_agent.py
-   
-   # Terminal 3: Summary Agent
-   python agents/summary_agent.py
-   
-   # Terminal 4: ChromaDB Viewer
-   python chroma_viewer/main.py
-   ```
-
-   **Option 3: Docker Compose**
-   ```bash
-   # Build and run all services
-   docker-compose up --build
-   ```
-
-## Usage
-
-### 1. Process Emails
-
-**Via Gmail Integration**
 ```bash
-# Process latest emails from Gmail
-python gmail_agent_integration.py
+# Run all tests
+pytest
 
-# Process specific number of emails (e.g., 5)
-python gmail_agent_integration.py --max-results 5
+# Run tests with coverage
+pytest --cov=a2a_agents tests/
+
+# Run a specific test file
+pytest tests/test_email_processor.py
 ```
 
-**Via API**
-```bash
-# Process a single email
-curl -X POST http://localhost:8001/process_email \
--H "Content-Type: application/json" \
--d '{
-  "sender": "customer@example.com",
-  "subject": "Request for Quote",
-  "body": "I'm interested in your services..."
-}'
-```
+### Code Style
 
-### 2. View Data
-- **ChromaDB Viewer**: `http://localhost:8000`
-- **Daily Summaries**: `logs/summaries/daily_summary_YYYY-MM-DD.txt`
-- **Agent Logs**: `logs/` directory
-
-### 3. Search and Query
-Use the ChromaDB viewer to:
-- Browse all stored emails and summaries
-- Search by content, sender, or date
-- View relationships between messages
-
-## Project Structure
-
-```
-a2a-mcp-contractor-automation/
-├── agents/                     # Agent implementations
-│   ├── __init__.py
-│   ├── email_processor_agent.py  # Processes incoming emails
-│   ├── response_agent.py        # Generates responses
-│   └── summary_agent.py         # Creates email summaries
-│
-├── chroma_viewer/             # Web interface for ChromaDB
-│   ├── static/                # Frontend assets
-│   ├── templates/             # HTML templates
-│   └── main.py                # FastAPI application
-│
-├── logs/                      # Log files
-│   └── summaries/             # Daily email summaries
-│
-├── tests/                     # Test files
-│   ├── test_email_processor.py
-│   └── test_summary_agent.py
-│
-├── .env.example              # Example environment variables
-├── config.py                 # Configuration settings
-├── gmail_agent_integration.py # Gmail API integration
-├── requirements.txt           # Python dependencies
-├── run_agents.sh             # Script to start all agents
-└── run_chroma_viewer.py      # Script to start ChromaDB viewer
-```
-
-## AI Integration & Configuration
-
-### Local LLM Setup
-This system uses Ollama with the following recommended models:
-- **mistral**: Best for general use (recommended)
-- **llama3**: Good alternative with strong performance
-- **phi3**: Lightweight option for less powerful machines
-
-To change the model, modify the `model_name` in the respective agent files.
-
-### ChromaDB Configuration
-- Data is persisted in `./chroma_data` by default
-- Collections are automatically created for:
-  - `emails`: Raw email content and metadata
-  - `summaries`: Generated email summaries
-  - `responses`: Generated email responses
-
-### Performance Tuning
-- Adjust timeouts in `.env` if needed:
-  ```env
-  LLM_TIMEOUT=300  # 5 minutes for LLM responses
-  GMAIL_TIMEOUT=60  # 1 minute for Gmail API
-  ```
-- For better performance, ensure your system meets these requirements:
-  - At least 8GB RAM (16GB recommended)
-  - 4+ CPU cores
-  - 10GB+ free disk space for models and data
+This project uses:
+- **Black** for code formatting
+- **isort** for import sorting
+- **flake8** for linting
 
 
-
-## Troubleshooting
+## 🐛 Troubleshooting
 
 ### Common Issues
 
-1. **Gmail API Authentication**
-   - Delete `token.json` and restart if authentication fails
-   - Ensure `credentials.json` is in the project root
+1. **Port Already in Use**
+   ```bash
+   # Find and kill the process using a specific port
+   sudo lsof -i :8000
+   kill -9 <PID>
+   ```
 
-2. **Ollama Connection Issues**
-   - Verify `ollama serve` is running
-   - Check that the model is downloaded: `ollama list`
+2. **Docker Container Issues**
+   ```bash
+   # Rebuild and restart all services
+   docker-compose down
+   docker-compose up --build -d
+   ```
 
-3. **ChromaDB Errors**
-   - Delete the `chroma_data` directory to reset (will lose data)
-   - Ensure no other process is using the database
+3. **LLM Connection Issues**
+   - Ensure Ollama (or your LLM service) is running
+   - Check the OLLAMA_API_BASE in your .env file
+   - Verify network connectivity between containers
 
-4. **Logs**
-   - Check `logs/` directory for detailed error messages
-   - Set `LOG_LEVEL=DEBUG` in `.env` for more verbose logging
+4. **ChromaDB Issues**
+   - Ensure the data directory has proper permissions
+   - Check if ChromaDB is accessible
+   - Reset the database if needed (data will be lost):
+     ```bash
+     docker-compose down -v
+     ```
 
-## Support
+### Viewing Logs
 
-For issues and feature requests, please open an issue on the project repository.
+```bash
+# View logs for all services
+docker-compose logs -f
 
-## License
+# View logs for a specific service
+docker-compose logs -f email_processor
 
-MIT License - see [LICENSE](LICENSE) file for details
+# View the last 100 lines of logs
+docker-compose logs --tail=100
+
+# Follow logs in real-time
+docker-compose logs -f --tail=50
+```
+
+
+
+
+## Future Enhancements
+
+- Support for additional communication channels (Slack, Teams)
+- Advanced analytics dashboard
+- Automated testing framework
+- Enhanced security features
+- Multi-tenant support
+
+
+
+MIT License - See [LICENSE](../LICENSE) for details
