@@ -3,6 +3,11 @@ import base64
 import json
 import email
 import time
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.message import MIMEMessage
+from email.header import Header
+from email.utils import formataddr, parseaddr, formatdate
 import re
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -460,6 +465,46 @@ async def get_latest_emails(service, max_results: int = 5) -> List[Dict[str, Any
         logger.error(f"Error fetching emails: {str(e)}")
         return []
 
+async def send_reply(original_email: EmailModel, response_text: str) -> None:
+    """Send a reply to the original email.
+    
+    Args:
+        original_email: The original email to reply to
+        response_text: The response text to send
+    """
+    try:
+        service = get_gmail_service()
+        
+        # Create the email message
+        msg = MIMEMultipart()
+        msg['To'] = original_email['sender']
+        msg['From'] = os.getenv('GMAIL_SENDER_EMAIL')
+        msg['Subject'] = f"Re: {original_email['subject']}"
+        msg['In-Reply-To'] = original_email.get('message_id', '')
+        msg['References'] = original_email.get('message_id', '')
+        msg['Date'] = formatdate(localtime=True)
+        
+        # Add the response text
+        msg.attach(MIMEText(response_text, 'plain', 'utf-8'))
+        
+        # Encode the message
+        raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode('utf-8')
+        
+        # Send the message
+        message = service.users().messages().send(
+            userId='me',
+            body={
+                'raw': raw_message,
+                'threadId': original_email.get('thread_id')
+            }
+        ).execute()
+        
+        logger.info(f"Reply sent successfully. Message ID: {message['id']}")
+        
+    except Exception as e:
+        logger.error(f"Error sending reply: {str(e)}")
+        raise
+
 async def process_email(client: httpx.AsyncClient, email: EmailModel, streaming: bool = True, debug: bool = False) -> bool:
     """Process an email using the email processor agent.
     
@@ -500,8 +545,33 @@ async def process_email(client: httpx.AsyncClient, email: EmailModel, streaming:
             )
             logger.info(f"\nSend request created: {request}")
             stream_response = client.send_message_streaming(request)
-            async for chunk in stream_response:
-                logger.info("response: " + chunk.model_dump_json(exclude_none=True, indent=2))
+            response_text = ""
+            
+            try:
+                async for chunk in stream_response:
+                    logger.info("response: " + chunk.model_dump_json(exclude_none=True, indent=2))
+                    try:
+                        result = chunk.model_dump()
+                        if result.get('result') and result['result'].get('artifact'):
+                            for part in result['result']['artifact'].get('parts', []):
+                                if 'text' in part:
+                                    response_text += part['text']
+                                    if response_text.strip():
+                                        logger.info(f"Sending reply with text: {response_text[:200]}...")  # Log first 200 chars
+                                        await send_reply(email, response_text)
+                                    else:
+                                        logger.warning("No response text to send as reply")
+                    except Exception as e:
+                        logger.error(f"Error processing chunk: {str(e)}")
+                        continue
+                
+ 
+                    
+            except Exception as e:
+                logger.error(f"Error in streaming response: {str(e)}")
+                raise
+
+                
             return True
         else:
             logger.info("\nProcessing without streaming...")
